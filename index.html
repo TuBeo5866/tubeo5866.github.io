@@ -1,10 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>My GitHub Page</title>
+<meta charset="UTF-8">
+<title>Static CDN</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+:root{
+  --bg:#0b0f19;
+  --card:#111827;
+  --border:#1f2937;
+  --text:#e5e7eb;
+  --muted:#9ca3af;
+  --accent:#f97316;
+}
+
+*{
+  box-sizing:border-box;
+}
+
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
+  background:var(--bg);
+  color:var(--text);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:100vh;
+}
+
+.container{
+  max-width:720px;
+  padding:40px;
+}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:40px;
+}
+
+h1{
+  margin:0 0 10px;
+  font-size:32px;
+}
+
+p{
+  color:var(--muted);
+  line-height:1.6;
+}
+
+.code{
+  background:#020617;
+  border:1px solid var(--border);
+  padding:12px;
+  border-radius:8px;
+  font-family:monospace;
+  margin-top:20px;
+  overflow:auto;
+}
+
+.footer{
+  margin-top:25px;
+  font-size:13px;
+  color:var(--muted);
+}
+
+.badge{
+  display:inline-block;
+  margin-top:15px;
+  padding:6px 10px;
+  font-size:12px;
+  border-radius:6px;
+  background:rgba(249,115,22,0.15);
+  color:var(--accent);
+}
+</style>
 </head>
+
 <body>
-  <h1>Hello GitHub Pages!</h1>
-  <p>Website đầu tiên của tôi.</p>
+
+<div class="container">
+  <div class="card">
+
+    <h1>Static CDN</h1>
+
+    <p>
+      This endpoint serves static assets only.
+      It is not a public website.
+    </p>
+
+    <p>
+      Files hosted here are intended to be accessed directly via URL
+      for use in web applications, scripts, and other projects.
+    </p>
+
+    <div class="code">
+https://username.github.io/assets/file.js
+    </div>
+
+    <div class="badge">
+      CDN Endpoint
+    </div>
+
+    <div class="footer">
+      Hosted via GitHub Pages.
+    </div>
+
+  </div>
+</div>
+
 </body>
 </html>
