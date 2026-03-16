@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Horizon UI Extension Studio
-Tạo mcpack cho Minecraft: Bedrock Edition - Horizon UI Extension
-"""
 
 import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat
 import urllib.request
@@ -15,7 +11,6 @@ from abc import ABC, abstractmethod
 # ─────────────────────────────────────────────────────────────
 
 def _tool_in_path(name: str) -> bool:
-    """True nếu tool có thể gọi được từ PATH."""
     try:
         subprocess.check_output([name, "--version"], stderr=subprocess.DEVNULL)
         return True
@@ -23,7 +18,6 @@ def _tool_in_path(name: str) -> bool:
         return False
 
 def _add_to_path(directory: str):
-    """Thêm thư mục vào PATH của tiến trình hiện tại."""
     d = str(directory)
     if d not in os.environ.get("PATH", ""):
         os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
@@ -31,13 +25,6 @@ def _add_to_path(directory: str):
 # ── Windows ──────────────────────────────────────────────────
 
 def _install_ffmpeg_windows() -> bool:
-    """
-    Thứ tự thử trên Windows:
-    1. winget
-    2. Scoop
-    3. Chocolatey
-    4. Download ZIP trực tiếp từ GitHub (ffmpeg-release-essentials)
-    """
     print("[ffmpeg] Trying winget...")
     try:
         r = subprocess.run(
@@ -116,13 +103,6 @@ def _install_ffmpeg_windows() -> bool:
 
 
 def _install_ytdlp_windows() -> bool:
-    """
-    Thứ tự thử trên Windows:
-    1. pip install yt-dlp  (đã có Python)
-    2. winget
-    3. Scoop
-    4. Download .exe trực tiếp từ GitHub
-    """
     print("[yt-dlp] Trying pip...")
     try:
         subprocess.check_call(
@@ -378,7 +358,6 @@ def _install_ytdlp_linux() -> bool:
 # ── Dispatcher ────────────────────────────────────────────────
 
 def _ensure_tool(name: str) -> bool:
-    """Kiểm tra tool, nếu thiếu thì cài bằng mọi phương pháp."""
     if _tool_in_path(name):
         print(f"[CHECK] {name} ✓ already in PATH")
         return True
@@ -419,10 +398,9 @@ def _ensure_tool(name: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-#  AUTO-INSTALL BOOTSTRAP (chạy trước khi import bất kỳ thứ gì)
+#  AUTO-INSTALL BOOTSTRAP
 # ─────────────────────────────────────────────────────────────
 def _bootstrap_install():
-    """Tự động cài tất cả Python packages + ffmpeg + yt-dlp."""
     pip_pkgs = [
         ("PyQt5",    "PyQt5"),
         ("Pillow",   "Pillow"),
@@ -475,6 +453,7 @@ import requests
 import psutil
 from PIL import Image, ImageFilter
 from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QDialog, QGridLayout, QFormLayout, QLabel,
@@ -651,11 +630,6 @@ class CompressorIoCompressor(Compressor):
 #  IMAGE ORDER DIALOG
 # ─────────────────────────────────────────────────────────────
 class ImageOrderDialog(QDialog):
-    """
-    Dialog cho user sắp xếp thứ tự các ảnh bằng drag-and-drop.
-    Mỗi item hiển thị: thumbnail 64×64 + tên file gốc.
-    """
-
     def __init__(self, images: list, parent=None):
         super().__init__(parent)
         self._images = list(images)   # list[Path]
@@ -768,7 +742,6 @@ class ImageOrderDialog(QDialog):
             self._list.setCurrentRow(row + 1)
 
     def ordered_paths(self) -> list:
-        """Trả về list[Path] theo thứ tự user đã sắp xếp."""
         result = []
         for i in range(self._list.count()):
             item = self._list.item(i)
@@ -871,7 +844,6 @@ class Worker(QtCore.QThread):
         return mp4s[0]
 
     def _download_container_bg(self, pack_root: Path):
-        """Download & extract hrzn_container_background.zip"""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         dst = pack_root / CONTAINER_BG_DIR
         self._ensure_dir(dst)
@@ -890,7 +862,6 @@ class Worker(QtCore.QThread):
             self.log(f"⚠️ Failed to download container background: {e}")
 
     def _extract_frames_anim(self, video: Path, pack_root: Path) -> Path:
-        """Extract ≤MAX_FRAMES frames → hrzn_animated_background/hans_common_xxx.png"""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         dst = pack_root / ANIM_BG_DIR
         if dst.exists(): shutil.rmtree(dst)
@@ -913,7 +884,6 @@ class Worker(QtCore.QThread):
         return dst
 
     def _extract_frames_loading(self, video: Path, pack_root: Path) -> Path:
-        """Extract ≤MAX_FRAMES frames → hrzn_loading_background/xxx.png"""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         dst = pack_root / LOADING_BG_DIR
         if dst.exists(): shutil.rmtree(dst)
@@ -944,7 +914,6 @@ class Worker(QtCore.QThread):
         return dst
 
     def _make_blur_png(self, anim_dir: Path):
-        """Làm mờ frame đầu tiên → hrzn_animated_background/blur.png"""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
         if not frames:
@@ -970,7 +939,6 @@ class Worker(QtCore.QThread):
         self.log(f"blur.png created via Pillow → {blur_out}")
 
     def _download_audio(self, video: Path, pack_root: Path):
-        """Extract audio từ video local → sounds/music/bgm/{name}.ogg"""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         bgm_name = re.sub(r'[\\/:*?"<>|]', "_", self.cfg.get("bgm_name", "bgm").strip()) or "bgm"
         sounds_path = pack_root / SOUNDS_DIR / f"{bgm_name}.ogg"
@@ -989,7 +957,6 @@ class Worker(QtCore.QThread):
         self.log("YouTube audio downloaded ✓")
 
     def _copy_bgm_file(self, pack_root: Path):
-        """Copy hoặc convert file BGM user chọn → sounds/music/bgm/{name}.ogg"""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         bgm_file = self.cfg.get("bgm_file", "").strip()
         if not bgm_file:
@@ -1016,7 +983,6 @@ class Worker(QtCore.QThread):
 
     # ── JSON generators ──────────────────────────────────────
     def _gen_bg_anim_json(self, anim_dir: Path, pack_root: Path):
-        """Tạo .hrzn_public_bg_anim.json"""
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
         n = len(frames)
         if n == 0:
@@ -1047,7 +1013,6 @@ class Worker(QtCore.QThread):
         self.log(f".hrzn_public_bg_anim.json generated ({n} frames)")
 
     def _gen_bg_load_json(self, load_dir: Path, pack_root: Path):
-        """Tạo .hrzn_public_bg_load.json"""
         IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
         all_imgs = [f for f in load_dir.iterdir() if f.suffix.lower() in IMG_EXT]
         frames = sorted(all_imgs, key=lambda p: int(p.stem) if p.stem.isdigit() else 0)
@@ -1183,7 +1148,6 @@ class Worker(QtCore.QThread):
         self.log("ui/_global_variables.json generated ✓")
 
     def _gen_music_definitions(self, pack_root: Path):
-        """Tạo sounds/music_definitions.json"""
         content = {
             "menu": {
                 "event_name": "music.menu",
@@ -1197,7 +1161,6 @@ class Worker(QtCore.QThread):
         self.log("sounds/music_definitions.json generated ✓")
 
     def _gen_sound_definitions(self, pack_root: Path):
-        """Tạo sounds/sound_definitions.json — dùng bgm_name từ cfg"""
         bgm_name = re.sub(r'[\\/:*?"<>|]', "_", self.cfg.get("bgm_name", "bgm").strip()) or "bgm"
         content = {
             "format_version": "1.20.20",
@@ -1223,12 +1186,6 @@ class Worker(QtCore.QThread):
         self.log("sounds/sound_definitions.json generated ✓")
 
     def _copy_loading_bg_folder(self, pack_root: Path):
-        """
-        Copy ảnh từ folder do user chọn vào hrzn_loading_background/.
-        - Nếu tên file đã là số nguyên (1.png, 2.png …) → copy thẳng.
-        - Nếu không → emit signal yêu cầu UI hiện dialog sắp xếp thứ tự,
-          đợi kết quả, rồi copy với tên đã đổi.
-        """
         if self._stop_requested: raise RuntimeError("Cancelled.")
         src_folder = self.cfg.get("loading_bg_folder", "").strip()
         if not src_folder:
@@ -1288,15 +1245,10 @@ class Worker(QtCore.QThread):
     _order_response_signal = QtCore.pyqtSignal(list)        # UI trả về list Path đã sắp xếp
 
     def _deliver_order(self, ordered: list):
-        """Được gọi từ main thread sau khi user xác nhận thứ tự."""
         self._order_result = ordered   # list[Path] hoặc []
         self._order_event.set()
 
     def _request_image_order(self, images: list):
-        """
-        Phát signal lên main thread để hiện ImageOrderDialog (blocking).
-        Trả về list[Path] đã sắp xếp, hoặc None nếu user cancel.
-        """
         import threading
         self._order_result = None
         self._order_event  = threading.Event()
@@ -1447,6 +1399,7 @@ class MainWindow(QWidget):
         self.worker = None
         self.setWindowTitle(WINDOW_TITLE)
         self.setMinimumWidth(720)
+        self.setMinimumHeight(720)
         self._build_ui()
         self._check_tools()
 
@@ -1459,101 +1412,120 @@ class MainWindow(QWidget):
                 self.append_log(f"⚠️ {tool} NOT found in PATH – some features may fail.")
 
     def _build_ui(self):
-        main_layout = QVBoxLayout(self)
+        # ═══════════════════════════════════════════════════════
+        #  Root: LEFT settings panel  |  RIGHT log panel
+        # ═══════════════════════════════════════════════════════
+        from PyQt5.QtWidgets import QSplitter
+        from PyQt5.QtCore import Qt as _Qt
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter)
+
+        # ───────────────────────────────────────────────────────
+        #  LEFT: scrollable settings + progress + buttons
+        # ───────────────────────────────────────────────────────
+        left_outer = QWidget()
+        left_outer.setMinimumWidth(360)
+        left_vbox = QVBoxLayout(left_outer)
+        left_vbox.setContentsMargins(0, 0, 0, 0)
+        left_vbox.setSpacing(4)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        container = QWidget()
-        scroll.setWidget(container)
-        g = QGridLayout(container)
-        main_layout.addWidget(scroll)
+        scroll.setFrameShape(QFrame.NoFrame)
+        form_widget = QWidget()
+        g = QGridLayout(form_widget)
+        g.setSpacing(6)
+        g.setContentsMargins(4, 4, 4, 4)
+        g.setColumnStretch(1, 1)
+        scroll.setWidget(form_widget)
+        left_vbox.addWidget(scroll, stretch=1)
 
         r = 0
-        def row_label(text, col=0): 
-            g.addWidget(QLabel(text), r, col)
 
-        # ── Video ──
-        g.addWidget(QLabel("Video File or YouTube URL:"), r, 0)
-        self.inp_video = QLineEdit()
-        btn_v = QPushButton("Browse…"); btn_v.clicked.connect(self.browse_video)
-        g.addWidget(self.inp_video, r, 1); g.addWidget(btn_v, r, 2); r += 1
+        def _sec(title):
+            nonlocal r
+            if r > 0:
+                sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+                sep.setStyleSheet("color:#444;")
+                g.addWidget(sep, r, 0, 1, 3); r += 1
+            lbl = QLabel(title)
+            lbl.setStyleSheet("font-weight:bold;color:#888;font-size:10px;padding-top:2px;")
+            g.addWidget(lbl, r, 0, 1, 3); r += 1
 
-        # ── Output ──
-        g.addWidget(QLabel("Output Folder:"), r, 0)
+        def _row(label, widget, btn=None, tooltip=""):
+            nonlocal r
+            lbl = QLabel(label)
+            if tooltip:
+                lbl.setToolTip(tooltip)
+            g.addWidget(lbl, r, 0)
+            if btn:
+                g.addWidget(widget, r, 1)
+                g.addWidget(btn, r, 2)
+            else:
+                g.addWidget(widget, r, 1, 1, 2)
+            r += 1
+
+        # ── OUTPUT ──────────────────────────────────────────
+        _sec("OUTPUT")
         self.inp_output = QLineEdit(str(Path.home() / "HorizonExtensions"))
         btn_o = QPushButton("Browse…"); btn_o.clicked.connect(self.browse_output)
-        g.addWidget(self.inp_output, r, 1); g.addWidget(btn_o, r, 2); r += 1
+        _row("Output Folder:", self.inp_output, btn_o)
 
-        # ── Extension Name ──
-        g.addWidget(QLabel("Extension Name:"), r, 0)
         self.inp_packname = QLineEdit("MyExtension")
-        g.addWidget(self.inp_packname, r, 1, 1, 2); r += 1
+        _row("Extension Name:", self.inp_packname)
 
-        # ── Creator ──
-        g.addWidget(QLabel("Creator Name:"), r, 0)
         self.inp_creator = QLineEdit("Unknown")
-        g.addWidget(self.inp_creator, r, 1, 1, 2); r += 1
+        _row("Creator Name:", self.inp_creator)
 
-        # ── BGM file picker ──
-        g.addWidget(QLabel("Background Music File:"), r, 0)
+        # ── VIDEO SOURCE ─────────────────────────────────────
+        _sec("VIDEO SOURCE")
+        self.inp_video = QLineEdit()
+        self.inp_video.setPlaceholderText("Local file or YouTube URL")
+        btn_v = QPushButton("Browse…"); btn_v.clicked.connect(self.browse_video)
+        _row("Video / YouTube URL:", self.inp_video, btn_v)
+
+        self.inp_start = QLineEdit("0")
+        _row("Start Time (s or mm:ss):", self.inp_start)
+
+        self.inp_end = QLineEdit("30")
+        _row("End Time (s or mm:ss):", self.inp_end)
+
+        self.spn_fps = QSpinBox(); self.spn_fps.setRange(1, 120); self.spn_fps.setValue(DEFAULT_FPS)
+        _row("Extract FPS:", self.spn_fps)
+
+        self.spn_anim_frames = QSpinBox(); self.spn_anim_frames.setRange(1, MAX_FRAMES); self.spn_anim_frames.setValue(MAX_FRAMES)
+        _row("Anim Frames (max 100):", self.spn_anim_frames)
+
+        self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, MAX_FRAMES); self.spn_load_frames.setValue(MAX_FRAMES)
+        _row("Loading Frames (max 100):", self.spn_load_frames)
+
+        # ── ASSETS ───────────────────────────────────────────
+        _sec("ASSETS")
         self.inp_bgm = QLineEdit()
         self.inp_bgm.setPlaceholderText("(optional — leave blank to extract from video)")
         self.inp_bgm.setToolTip(
-            "Pick an audio file (.ogg, .mp3, .wav, .flac, .m4a, .aac…).\n"
-            "If not .ogg, it will be auto-converted to Vorbis OGG.\n"
-            "The filename (without extension) becomes the BGM track name.\n"
-            "Leave blank to extract audio directly from the video."
+            "Pick an audio file (.ogg, .mp3, .wav, .flac, .m4a, .aac…).\nIf not .ogg, auto-converted to Vorbis OGG.\nLeave blank to extract audio from video."
         )
-        btn_bgm = QPushButton("Browse…")
-        btn_bgm.clicked.connect(self.browse_bgm)
-        g.addWidget(self.inp_bgm, r, 1)
-        g.addWidget(btn_bgm, r, 2)
-        r += 1
+        btn_bgm = QPushButton("Browse…"); btn_bgm.clicked.connect(self.browse_bgm)
+        _row("Background Music File:", self.inp_bgm, btn_bgm)
 
-        # ── Time range ──
-        g.addWidget(QLabel("Start Time (s or mm:ss):"), r, 0)
-        self.inp_start = QLineEdit("0")
-        g.addWidget(self.inp_start, r, 1, 1, 2); r += 1
-
-        g.addWidget(QLabel("End Time (s or mm:ss):"), r, 0)
-        self.inp_end = QLineEdit("30")
-        g.addWidget(self.inp_end, r, 1, 1, 2); r += 1
-
-        # ── FPS ──
-        g.addWidget(QLabel("Extract FPS:"), r, 0)
-        self.spn_fps = QSpinBox(); self.spn_fps.setRange(1, 120); self.spn_fps.setValue(DEFAULT_FPS)
-        g.addWidget(self.spn_fps, r, 1, 1, 2); r += 1
-
-        # ── Frame counts ──
-        g.addWidget(QLabel("Anim Frames (max 100):"), r, 0)
-        self.spn_anim_frames = QSpinBox(); self.spn_anim_frames.setRange(1, MAX_FRAMES); self.spn_anim_frames.setValue(MAX_FRAMES)
-        g.addWidget(self.spn_anim_frames, r, 1, 1, 2); r += 1
-
-        g.addWidget(QLabel("Loading Frames (max 100):"), r, 0)
-        self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, MAX_FRAMES); self.spn_load_frames.setValue(MAX_FRAMES)
-        g.addWidget(self.spn_load_frames, r, 1, 1, 2); r += 1
-
-        # ── Loading BG folder ──────────────────────────────────────────────
-        lbl_lbg = QLabel("Folder contains Loading\nBackground images:")
-        lbl_lbg.setToolTip(
-            "Optional: pick a folder with PNG images to use as loading screen.\n"
-            "If filenames are already numbers (1.png, 2.png\u2026) they are copied as-is.\n"
-            "Otherwise a reorder dialog will appear so you can set playback order.\n"
-            "Leave blank to extract frames from the video instead."
-        )
-        g.addWidget(lbl_lbg, r, 0)
         self.inp_loading_bg = QLineEdit()
-        self.inp_loading_bg.setPlaceholderText("(optional \u2014 leave blank to use video frames)")
-        btn_lbg = QPushButton("Browse\u2026")
-        btn_lbg.clicked.connect(self.browse_loading_bg)
-        g.addWidget(self.inp_loading_bg, r, 1)
-        g.addWidget(btn_lbg, r, 2)
-        r += 1
+        self.inp_loading_bg.setPlaceholderText("(optional — leave blank to use video frames)")
+        self.inp_loading_bg.setToolTip(
+            "Optional: folder with images for loading screen.\nNumeric filenames → copied as-is.\nOther names → reorder dialog appears.\nLeave blank to extract frames from video."
+        )
+        btn_lbg = QPushButton("Browse…"); btn_lbg.clicked.connect(self.browse_loading_bg)
+        _row("Loading Background Folder:", self.inp_loading_bg, btn_lbg)
 
-        # ── Compression Method ──────────────────────────────────────────────
-        g.addWidget(QLabel("Compression Method:"), r, 0)
+        # ── COMPRESSION ──────────────────────────────────────
+        _sec("COMPRESSION")
         self.cmb_compress = QComboBox()
-        # order must match _build_api_stack() indices below
         self._compress_methods = [
             "Lossless", "Pillow", "FFmpeg", "TinyPNG",
             "Kraken", "ImageKit", "Cloudinary",
@@ -1561,30 +1533,24 @@ class MainWindow(QWidget):
         ]
         self.cmb_compress.addItems(self._compress_methods)
         self.cmb_compress.setCurrentText("Lossless")
-        g.addWidget(self.cmb_compress, r, 1, 1, 2); r += 1
+        _row("Method:", self.cmb_compress)
 
-        # ── Per-method API panel (stacked) ──────────────────────────────────
         self._api_stack = QStackedWidget()
         self._api_stack.setFrameShape(QStackedWidget.StyledPanel)
 
         def make_panel(rows):
-            """rows = list of (label, widget).  Returns (QWidget, [widgets])"""
             w = QWidget()
             fl = QFormLayout(w)
             fl.setContentsMargins(8, 6, 8, 6)
-            fl.setSpacing(6)
-            widgets = []
-            for lbl, wgt in rows:
-                fl.addRow(lbl, wgt)
-                widgets.append(wgt)
+            fl.setSpacing(5)
+            for lb, wg in rows:
+                fl.addRow(lb, wg)
             return w
 
-        # 0 – Lossless  (no fields)
-        _lossless_lbl = QLabel("No configuration needed.")
-        _lossless_lbl.setStyleSheet("color: grey; font-style: italic;")
-        _lossless_w = QWidget()
-        QVBoxLayout(_lossless_w).addWidget(_lossless_lbl)
-        self._api_stack.addWidget(_lossless_w)
+        # 0 – Lossless
+        _lw = QWidget(); _ll = QLabel("No configuration needed.")
+        _ll.setStyleSheet("color:grey;font-style:italic;")
+        QVBoxLayout(_lw).addWidget(_ll); self._api_stack.addWidget(_lw)
 
         # 1 – Pillow
         self.cmb_pillow_q = QComboBox()
@@ -1620,10 +1586,10 @@ class MainWindow(QWidget):
         self.inp_imagekitp = QLineEdit(); self.inp_imagekitp.setPlaceholderText("https://ik.imagekit.io/yourname")
         self.inp_imagekitq = QSpinBox(); self.inp_imagekitq.setRange(1, 100); self.inp_imagekitq.setValue(90)
         self._api_stack.addWidget(make_panel([
-            ("Public Key:",    self.inp_imagekit),
-            ("Private Key:",   self.inp_imagekits),
-            ("URL Endpoint:",  self.inp_imagekitp),
-            ("Quality:",       self.inp_imagekitq),
+            ("Public Key:",   self.inp_imagekit),
+            ("Private Key:",  self.inp_imagekits),
+            ("URL Endpoint:", self.inp_imagekitp),
+            ("Quality:",      self.inp_imagekitq),
         ]))
 
         # 6 – Cloudinary
@@ -1632,7 +1598,8 @@ class MainWindow(QWidget):
         self.inp_cloudinaryk.setEchoMode(QLineEdit.Password)
         self.inp_cloudinarys = QLineEdit(); self.inp_cloudinarys.setPlaceholderText("API Secret")
         self.inp_cloudinarys.setEchoMode(QLineEdit.Password)
-        self.cmb_cloudinaryq = QComboBox(); self.cmb_cloudinaryq.addItems(["auto", "auto:best", "auto:good", "auto:eco", "auto:low"])
+        self.cmb_cloudinaryq = QComboBox()
+        self.cmb_cloudinaryq.addItems(["auto", "auto:best", "auto:good", "auto:eco", "auto:low"])
         self.cmb_cloudinaryq.setCurrentText("auto:best")
         self._api_stack.addWidget(make_panel([
             ("Cloud Name:",  self.inp_cloudinary),
@@ -1641,52 +1608,105 @@ class MainWindow(QWidget):
             ("Quality:",     self.cmb_cloudinaryq),
         ]))
 
-        # 7 – Imagecompressr  (browser automation, no keys needed)
-        _ic_lbl = QLabel("Uses headless Chrome – no API key required.")
-        _ic_lbl.setStyleSheet("color: grey; font-style: italic;")
-        _ic_lbl.setWordWrap(True)
-        _ic_w = QWidget(); QVBoxLayout(_ic_w).addWidget(_ic_lbl)
-        self._api_stack.addWidget(_ic_w)
+        # 7 – Imagecompressr
+        _iw = QWidget(); _il = QLabel("Uses headless Chrome – no API key required.")
+        _il.setStyleSheet("color:grey;font-style:italic;"); _il.setWordWrap(True)
+        QVBoxLayout(_iw).addWidget(_il); self._api_stack.addWidget(_iw)
 
-        # 8 – Compressor.io  (browser automation, no keys needed)
-        _cio_lbl = QLabel("Uses headless Chrome – no API key required.")
-        _cio_lbl.setStyleSheet("color: grey; font-style: italic;")
-        _cio_lbl.setWordWrap(True)
-        _cio_w = QWidget(); QVBoxLayout(_cio_w).addWidget(_cio_lbl)
-        self._api_stack.addWidget(_cio_w)
+        # 8 – Compressor.io
+        _cw = QWidget(); _cl = QLabel("Uses headless Chrome – no API key required.")
+        _cl.setStyleSheet("color:grey;font-style:italic;"); _cl.setWordWrap(True)
+        QVBoxLayout(_cw).addWidget(_cl); self._api_stack.addWidget(_cw)
 
-        # wire combobox → stack
-        def _on_method_changed(text):
+        def _on_method(text):
             idx = self._compress_methods.index(text) if text in self._compress_methods else 0
             self._api_stack.setCurrentIndex(idx)
+        self.cmb_compress.currentTextChanged.connect(_on_method)
+        _on_method(self.cmb_compress.currentText())
 
-        self.cmb_compress.currentTextChanged.connect(_on_method_changed)
-        _on_method_changed(self.cmb_compress.currentText())   # init
-
-        # wrap stack in a titled group-box so it looks like a dropdown section
         api_grp = QGroupBox("Compression Settings")
-        api_grp_layout = QVBoxLayout(api_grp)
-        api_grp_layout.setContentsMargins(4, 4, 4, 4)
-        api_grp_layout.addWidget(self._api_stack)
+        _ag = QVBoxLayout(api_grp); _ag.setContentsMargins(4, 4, 4, 4)
+        _ag.addWidget(self._api_stack)
         g.addWidget(api_grp, r, 0, 1, 3); r += 1
 
-        # ── Log ──
-        g.addWidget(QLabel("Log:"), r, 0)
-        self.log_box = QTextEdit(); self.log_box.setReadOnly(True); self.log_box.setMinimumHeight(160)
-        g.addWidget(self.log_box, r, 1, 1, 2); r += 1
-
-        # ── Progress ──
+        # ── Progress bar ─────────────────────────────────────
         self.progress_bar = QProgressBar()
-        g.addWidget(self.progress_bar, r, 0, 1, 3); r += 1
+        self.progress_bar.setFixedHeight(14)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar{border:1px solid #555;border-radius:3px;background:#2a2a2a;}"
+            "QProgressBar::chunk{background:#27ae60;border-radius:2px;}"
+        )
+        left_vbox.addWidget(self.progress_bar)
 
-        # ── Buttons ──
-        btn_row = QHBoxLayout()
-        self.btn_run = QPushButton("▶ Build mcpack"); self.btn_run.clicked.connect(self.run_process)
-        self.btn_cancel = QPushButton("✖ Cancel"); self.btn_cancel.setEnabled(False); self.btn_cancel.clicked.connect(self.cancel_process)
-        btn_row.addWidget(self.btn_run); btn_row.addWidget(self.btn_cancel)
-        g.addLayout(btn_row, r, 0, 1, 3); r += 1
+        # ── Buttons ───────────────────────────────────────────
+        btn_bar = QHBoxLayout()
+        btn_bar.setContentsMargins(4, 2, 4, 4)
+        self.btn_run = QPushButton("▶  Build mcpack")
+        self.btn_run.setFixedHeight(36)
+        self.btn_run.setStyleSheet(
+            "QPushButton{background:#27ae60;color:white;font-weight:bold;"
+            "border-radius:5px;font-size:13px;}"
+            "QPushButton:hover{background:#2ecc71;}"
+            "QPushButton:disabled{background:#555;color:#888;}"
+        )
+        self.btn_run.clicked.connect(self.run_process)
 
-        main_layout.addLayout(btn_row)
+        self.btn_cancel = QPushButton("✖  Cancel")
+        self.btn_cancel.setFixedHeight(36)
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setStyleSheet(
+            "QPushButton{background:#c0392b;color:white;font-weight:bold;"
+            "border-radius:5px;font-size:13px;}"
+            "QPushButton:hover{background:#e74c3c;}"
+            "QPushButton:disabled{background:#555;color:#888;}"
+        )
+        self.btn_cancel.clicked.connect(self.cancel_process)
+        btn_bar.addWidget(self.btn_run, stretch=3)
+        btn_bar.addWidget(self.btn_cancel, stretch=1)
+        left_vbox.addLayout(btn_bar)
+
+        splitter.addWidget(left_outer)
+
+        # ───────────────────────────────────────────────────────
+        #  RIGHT: log + status line
+        # ───────────────────────────────────────────────────────
+        right_widget = QWidget()
+        right_widget.setMinimumWidth(280)
+        right_vbox = QVBoxLayout(right_widget)
+        right_vbox.setContentsMargins(0, 0, 0, 0)
+        right_vbox.setSpacing(4)
+
+        log_hdr = QLabel("Build Log")
+        log_hdr.setStyleSheet("font-weight:bold;font-size:12px;padding:2px 0;")
+        right_vbox.addWidget(log_hdr)
+
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setStyleSheet(
+            "QTextEdit{background:#1e1e1e;color:#d4d4d4;"
+            "font-family:'Courier New',Monospace;font-size:10px;"
+            "border:1px solid #444;border-radius:4px;padding:4px;}"
+        )
+        right_vbox.addWidget(self.log_box, stretch=1)
+
+        self.lbl_status = QLabel()
+        self.lbl_status.setText(
+            "<span style='color:#888;font-size:10px;'>"
+            "ⓘ This script is licensed under GNU v3 License."
+            "</span><br>"
+            "<span style='color:#666;font-size:10px;'>"
+            "Made with love for HorizonUI Extension Makers!"
+            "</span>"
+        )
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setStyleSheet(
+            "border-top:1px solid #333; padding:4px 4px 2px 4px;"
+        )
+        right_vbox.addWidget(self.lbl_status)
+
+        splitter.addWidget(right_widget)
+        splitter.setSizes([420, 580])
 
     # ── Slots ─────────────────────────────────────────────────
     def browse_video(self):
@@ -1774,9 +1794,6 @@ class MainWindow(QWidget):
         self.worker.start()
 
     def _on_show_order_dialog(self, path_strings: list):
-        """
-        Chạy trên main thread. Hiện ImageOrderDialog, rồi trả kết quả về worker.
-        """
         images = [Path(p) for p in path_strings]
         dlg = ImageOrderDialog(images, parent=self)
         if dlg.exec_() == dlg.Accepted:
@@ -1919,16 +1936,8 @@ all terms listed below. If you do not agree, click "Decline" to exit.
 ───────────────────────────────────────────────────────────────────────────────
 """
 
-# Path lưu flag đồng ý — nằm trong home folder, ẩn
 _AGREED_FLAG = Path.home() / ".hrzn_studio_agreed"
-
-
 def _check_license(app: "QApplication") -> bool:
-    """
-    Hiện dialog license nếu user chưa đồng ý.
-    Trả về True nếu được phép tiếp tục, False nếu Decline / đóng cửa sổ.
-    Nếu đã đồng ý từ trước (flag file tồn tại) → bỏ qua, trả về True ngay.
-    """
     if _AGREED_FLAG.exists():
         return True
 
