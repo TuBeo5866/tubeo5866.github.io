@@ -60,15 +60,16 @@ def _log(msg, *, level="info"):
     if _quiet_mode and level == "info":
         return
     if level == "info":
-        print(_c(msg, C_CYAN))
+        # dim cyan for routine messages
+        print(_c("  " + msg, C_CYAN, C_DIM))
     elif level == "ok":
-        print(_c("✓  " + msg, C_GREEN))
+        print(_c("✓  " + msg, C_GREEN, C_BOLD))
     elif level == "warn":
         print(_c("⚠  " + msg, C_YELLOW))
     elif level == "err":
-        print(_c("✗  " + msg, C_RED), file=sys.stderr)
+        print(_c("✗  " + msg, C_RED, C_BOLD), file=sys.stderr)
     elif level == "step":
-        print(_c("── " + msg, C_BOLD))
+        print(f"\n{C_BOLD}{C_BLUE}──{C_RESET} {C_BOLD}{msg}{C_RESET}")
     else:
         print(msg)
 
@@ -225,9 +226,10 @@ class CLIWorker:
             return
         bar_len = 30
         filled  = int(bar_len * pct / 100)
-        bar     = _c("█" * filled, C_GREEN) + _c("░" * (bar_len - filled), C_DIM)
-        label_s = f"  {label}" if label else ""
-        print(f"\r  [{bar}] {pct:3d}%{label_s}", end="", flush=True)
+        bar     = _c("█" * filled, C_GREEN, C_BOLD) + _c("░" * (bar_len - filled), C_DIM)
+        pct_col = _c(f"{pct:3d}%", C_YELLOW, C_BOLD)
+        label_s = f"  {_c(label, C_CYAN, C_DIM)}" if label else ""
+        print(f"\r  {_c('[', C_DIM)}{bar}{_c(']', C_DIM)} {pct_col}{label_s}   ", end="", flush=True)
         if pct >= 100:
             print()
 
@@ -777,19 +779,30 @@ def _interactive():
     _print_banner()
     print(_c("\n  Interactive mode  –  press Enter to accept [defaults]\n", C_DIM))
 
+    def _sec(title, colour=C_YELLOW):
+        print(f"\n  {colour}{C_BOLD}── {title} {'─'*(40-len(title))}{C_RESET}")
+
     cfg = {}
-    cfg["video_path"]     = _ask("Video file or YouTube URL", required=True)
-    cfg["start_seconds"]  = CLIWorker._parse_time(_ask("Start time (s or mm:ss)", "0"))
-    cfg["end_seconds"]    = CLIWorker._parse_time(_ask("End time   (s or mm:ss)", "30"))
-    cfg["fps"]            = int(_ask("Extract FPS", str(DEFAULT_FPS)))
-    cfg["anim_frames"]    = int(_ask("Animated background frames (max 100)", str(MAX_FRAMES)))
-    cfg["load_frames"]    = int(_ask("Loading background frames  (max 100)", str(MAX_FRAMES)))
+
+    _sec("SOURCE", C_CYAN)
+    cfg["video_path"]    = _ask("Video file or YouTube URL", required=True)
+    cfg["start_seconds"] = CLIWorker._parse_time(_ask("Start time (s or mm:ss)", "0"))
+    cfg["end_seconds"]   = CLIWorker._parse_time(_ask("End time   (s or mm:ss)", "30"))
+    cfg["fps"]           = int(_ask("Extract FPS", str(DEFAULT_FPS)))
+    cfg["anim_frames"]   = int(_ask("Animated background frames (max 100)", str(MAX_FRAMES)))
+    cfg["load_frames"]   = int(_ask("Loading background frames  (max 100)", str(MAX_FRAMES)))
+
+    _sec("OUTPUT", C_GREEN)
     cfg["new_pack_name"]  = _ask("Extension name", "MyExtension")
     cfg["creator"]        = _ask("Creator name",   "Unknown")
-    cfg["bgm_name"]       = _ask("BGM track name (used in sound_definitions)", "bgm")
-    cfg["bgm_file"]       = _ask("Custom BGM file (.ogg/.mp3/…) – leave blank to extract from video", "")
-    cfg["loading_bg_folder"] = _ask("Loading BG folder – leave blank to use video frames", "")
     cfg["output_folder"]  = _ask("Output directory", str(Path.home() / "HorizonExtensions"))
+
+    _sec("ASSETS", C_MAG)
+    cfg["bgm_name"]          = _ask("BGM track name (used in sound_definitions)", "bgm")
+    cfg["bgm_file"]          = _ask("Custom BGM file (.ogg/.mp3/…) – blank = extract from video", "")
+    cfg["loading_bg_folder"] = _ask("Loading BG folder – blank = use video frames", "")
+
+    _sec("COMPRESSION", C_YELLOW)
 
     compress_methods = ["lossless","pillow","ffmpeg","tinypng","kraken","imagekit","cloudinary","compressor"]
     cfg["compress_method"] = _choose("Compression method", compress_methods, "lossless")
@@ -823,93 +836,168 @@ def _interactive():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _print_banner():
-    print(_c("""
-  ╔══════════════════════════════════════════════════════════╗
-  ║      Horizon UI Extension Studio  –  CLI                ║
-  ║      Tao mcpack cho Minecraft: Bedrock Edition           ║
-  ║      Original Creator : Han's404  |  @zxyn404 ( Han's ) ║
-  ╚══════════════════════════════════════════════════════════╝""", C_MAG, C_BOLD))
+    M  = C_MAG  + C_BOLD  if _USE_COLOUR else ""
+    C  = C_CYAN + C_BOLD  if _USE_COLOUR else ""
+    Y  = C_YELLOW         if _USE_COLOUR else ""
+    G  = C_GREEN          if _USE_COLOUR else ""
+    R  = C_RESET          if _USE_COLOUR else ""
+    D  = C_DIM            if _USE_COLOUR else ""
+    print(f"""
+{M}  ╔══════════════════════════════════════════════════════════╗{R}
+{M}  ║  {C}Horizon UI Extension Studio  {D}–{R}{C}  CLI{R}{M}                   ║{R}
+{M}  ║  {Y}Tao mcpack cho Minecraft: Bedrock Edition{R}{M}           ║{R}
+{M}  ║  {G}Original Creator : Han's404  |  @zxyn404 ( Han's ){R}{M}  ║{R}
+{M}  ╚══════════════════════════════════════════════════════════╝{R}""")
 
 
-_USAGE = """\
-usage:
-  horizon_cli.py [--video PATH_OR_URL] [--start TIME] [--end TIME]
-                 [--fps N] [--anim-frames N] [--load-frames N]
-                 [--output DIR] [--name NAME] [--creator NAME]
-                 [--bgm FILE] [--bgm-name NAME] [--loading-bg DIR]
-                 [--compress METHOD] [--pillow-quality LEVEL]
-                 [--ffmpeg-qv N]
-                 [--tinypng-key KEY]
-                 [--kraken-key KEY] [--kraken-secret SECRET] [--kraken-quality N]
-                 [--imagekit-key KEY] [--imagekit-secret SECRET]
-                 [--imagekit-endpoint URL] [--imagekit-quality N]
-                 [--cloudinary-name NAME] [--cloudinary-key KEY]
-                 [--cloudinary-secret SECRET]
-                 [--cloudinary-quality {auto,auto:best,auto:good,auto:eco,auto:low}]
-                 [--interactive] [--quiet] [--skip-bootstrap]
-"""
+def _print_help():
+    # colour shortcuts
+    S  = C_YELLOW + C_BOLD  if _USE_COLOUR else ""   # section header
+    F  = C_CYAN             if _USE_COLOUR else ""   # flag  --xxx
+    V  = C_GREEN            if _USE_COLOUR else ""   # value / metavar
+    D  = C_DIM              if _USE_COLOUR else ""   # dim description text
+    W  = C_BOLD             if _USE_COLOUR else ""   # white-bold
+    R  = C_RESET            if _USE_COLOUR else ""
+    Y  = C_YELLOW           if _USE_COLOUR else ""
+    G  = C_GREEN            if _USE_COLOUR else ""
+    M  = C_MAG              if _USE_COLOUR else ""
 
-_HELP = _USAGE + """
-options:
-  -h, --help          show this help message and exit
-  --interactive, -i   Force interactive prompt mode
-  --quiet, -q         Suppress detailed log output
-  --skip-bootstrap    Skip automatic tool/package installation check
+    def sec(name):
+        print(f"\n{S}{name}:{R}")
 
-source:
-  --video PATH_OR_URL   Local video file or YouTube URL
-  --start TIME          Start time in seconds or mm:ss (default: 0)
-  --end TIME            End time in seconds or mm:ss (default: 30)
-  --fps N               Frame extraction FPS (default: 20)
-  --anim-frames N       Number of animated background frames, max 100 (default: 100)
-  --load-frames N       Number of loading background frames, max 100 (default: 100)
+    def row(flag, meta, desc, default=None):
+        def_s = f"  {D}(default: {default}){R}" if default else ""
+        print(f"  {F}{flag}{R}  {V}{meta}{R}  {D}{desc}{R}{def_s}")
 
-output:
-  --output, -o DIR      Output directory (default: ~/HorizonExtensions)
-  --name, -n NAME       Extension / pack name (default: MyExtension)
-  --creator, -c NAME    Creator name embedded in manifest (default: Unknown)
+    def flag(flags, desc):
+        print(f"  {F}{flags}{R}  {D}{desc}{R}")
 
-assets:
-  --bgm FILE            Background music file (.ogg/.mp3/.wav/…). Omit to extract from video.
-  --loading-bg DIR      Folder with images for loading screen. Omit to extract from video.
-  --bgm-name NAME       BGM track name used in sound_definitions.json (default: bgm)
+    def ex(comment, cmd):
+        print(f"  {D}# {comment}{R}")
+        # colour --flags inside the command line
+        coloured_cmd = re.sub(r'(--[\w-]+|-[a-z])', f'{F}\\1{R}', cmd)
+        coloured_cmd = re.sub(r'"([^"]+)"', f'{V}"\\1"{R}', coloured_cmd)
+        print(f"  {W}python horizon_cli.py{R} {coloured_cmd}")
+        print()
 
-compression:
-  --compress METHOD     Compression method:
-                          lossless | pillow | ffmpeg | tinypng |
-                          kraken | imagekit | cloudinary | compressor
-                        (default: lossless)
-  --pillow-quality {low,medium,high,maximum}
-  --ffmpeg-qv N         FFmpeg -q:v value 1-31 (default: 1 = best)
-  --tinypng-key KEY     TinyPNG API key
-  --kraken-key KEY
-  --kraken-secret SECRET
-  --kraken-quality N
-  --imagekit-key KEY
-  --imagekit-secret SECRET
-  --imagekit-endpoint URL
-  --imagekit-quality N
-  --cloudinary-name NAME
-  --cloudinary-key KEY
-  --cloudinary-secret SECRET
-  --cloudinary-quality {auto,auto:best,auto:good,auto:eco,auto:low}
+    # ── usage ──────────────────────────────────────────────────────────────
+    print(f"\n{W}usage:{R}")
+    usage_flags = (
+        f"  {W}horizon_cli.py{R} "
+        f"{F}[--video{R} {V}PATH_OR_URL{R}{F}]{R} "
+        f"{F}[--start{R} {V}TIME{R}{F}]{R} "
+        f"{F}[--end{R} {V}TIME{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--fps{R} {V}N{R}{F}]{R} "
+        f"{F}[--anim-frames{R} {V}N{R}{F}]{R} "
+        f"{F}[--load-frames{R} {V}N{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--output{R} {V}DIR{R}{F}]{R} "
+        f"{F}[--name{R} {V}NAME{R}{F}]{R} "
+        f"{F}[--creator{R} {V}NAME{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--bgm{R} {V}FILE{R}{F}]{R} "
+        f"{F}[--bgm-name{R} {V}NAME{R}{F}]{R} "
+        f"{F}[--loading-bg{R} {V}DIR{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--compress{R} {V}METHOD{R}{F}]{R} "
+        f"{F}[--pillow-quality{R} {V}LEVEL{R}{F}]{R} "
+        f"{F}[--ffmpeg-qv{R} {V}N{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--tinypng-key{R} {V}KEY{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--kraken-key{R} {V}KEY{R}{F}]{R} "
+        f"{F}[--kraken-secret{R} {V}SECRET{R}{F}]{R} "
+        f"{F}[--kraken-quality{R} {V}N{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--imagekit-key{R} {V}KEY{R}{F}]{R} "
+        f"{F}[--imagekit-secret{R} {V}SECRET{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--imagekit-endpoint{R} {V}URL{R}{F}]{R} "
+        f"{F}[--imagekit-quality{R} {V}N{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--cloudinary-name{R} {V}NAME{R}{F}]{R} "
+        f"{F}[--cloudinary-key{R} {V}KEY{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--cloudinary-secret{R} {V}SECRET{R}{F}]{R} "
+        f"{F}[--cloudinary-quality{R} {V}LEVEL{R}{F}]{R}\n"
+        f"               "
+        f"{F}[--interactive]{R} "
+        f"{F}[--quiet]{R} "
+        f"{F}[--skip-bootstrap]{R}"
+    )
+    print(usage_flags)
 
-examples:
-  # Interactive mode (recommended for first-time use)
-  python horizon_cli.py
+    # ── options ────────────────────────────────────────────────────────────
+    sec("options")
+    flag("-h, --help",         "show this help message and exit")
+    flag("--interactive, -i",  "Force interactive prompt mode")
+    flag("--quiet, -q",        "Suppress detailed log output")
+    flag("--skip-bootstrap",   "Skip automatic tool/package installation check")
 
-  # Non-interactive with a local video
-  python horizon_cli.py --video myvideo.mp4 --name MyPack --creator Han
+    # ── source ─────────────────────────────────────────────────────────────
+    sec("source")
+    row("--video",       "PATH_OR_URL", "Local video file or YouTube URL")
+    row("--start",       "TIME",        "Start time in seconds or mm:ss", "0")
+    row("--end",         "TIME",        "End time in seconds or mm:ss",   "30")
+    row("--fps",         "N",           "Frame extraction FPS",           "20")
+    row("--anim-frames", "N",           "Number of animated background frames, max 100", "100")
+    row("--load-frames", "N",           "Number of loading background frames, max 100",  "100")
 
-  # YouTube URL with time range
-  python horizon_cli.py --video "https://youtu.be/xxxx" --start 10 --end 40 --name BeachPack
+    # ── output ─────────────────────────────────────────────────────────────
+    sec("output")
+    row("--output, -o",  "DIR",  "Output directory",                    "~/HorizonExtensions")
+    row("--name, -n",    "NAME", "Extension / pack name",               "MyExtension")
+    row("--creator, -c", "NAME", "Creator name embedded in manifest",   "Unknown")
 
-  # With custom BGM and compression
-  python horizon_cli.py --video clip.mp4 --name CoolPack --compress pillow --pillow-quality high
+    # ── assets ─────────────────────────────────────────────────────────────
+    sec("assets")
+    row("--bgm",         "FILE", "Background music file (.ogg/.mp3/.wav/…).\n"
+                                 "                    Omit to extract from video.")
+    row("--loading-bg",  "DIR",  "Folder with images for loading screen.\n"
+                                 "                    Omit to extract from video.")
+    row("--bgm-name",    "NAME", "BGM track name used in sound_definitions.json", "bgm")
 
-  # With a loading-background folder
-  python horizon_cli.py --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
-"""
+    # ── compression ────────────────────────────────────────────────────────
+    sec("compression")
+    methods = ["lossless", "pillow", "ffmpeg", "tinypng",
+               "kraken",  "imagekit", "cloudinary", "compressor"]
+    methods_str = " | ".join(
+        f"{M}{m}{R}" if i % 4 == 3 or i == len(methods)-1
+        else f"{G}{m}{R}"
+        for i, m in enumerate(methods)
+    )
+    print(f"  {F}--compress{R}  {V}METHOD{R}  {D}Compression method:{R}")
+    print(f"              {G}lossless{R} | {G}pillow{R} | {G}ffmpeg{R} | {G}tinypng{R} |")
+    print(f"              {G}kraken{R}   | {G}imagekit{R} | {G}cloudinary{R} | {G}compressor{R}")
+    print(f"              {D}(default: lossless){R}")
+    print(f"  {F}--pillow-quality{R}  {V}{{low,medium,high,maximum}}{R}")
+    print(f"  {F}--ffmpeg-qv{R}  {V}N{R}  {D}FFmpeg -q:v value 1-31{R}  {D}(default: 1 = best){R}")
+    print(f"  {F}--tinypng-key{R}       {V}KEY{R}")
+    print(f"  {F}--kraken-key{R}        {V}KEY{R}")
+    print(f"  {F}--kraken-secret{R}     {V}SECRET{R}")
+    print(f"  {F}--kraken-quality{R}    {V}N{R}")
+    print(f"  {F}--imagekit-key{R}      {V}KEY{R}")
+    print(f"  {F}--imagekit-secret{R}   {V}SECRET{R}")
+    print(f"  {F}--imagekit-endpoint{R} {V}URL{R}")
+    print(f"  {F}--imagekit-quality{R}  {V}N{R}")
+    print(f"  {F}--cloudinary-name{R}   {V}NAME{R}")
+    print(f"  {F}--cloudinary-key{R}    {V}KEY{R}")
+    print(f"  {F}--cloudinary-secret{R} {V}SECRET{R}")
+    print(f"  {F}--cloudinary-quality{R} {V}{{auto,auto:best,auto:good,auto:eco,auto:low}}{R}")
+
+    # ── examples ───────────────────────────────────────────────────────────
+    sec("examples")
+    ex("Interactive mode (recommended for first-time use)",
+       "")
+    ex("Non-interactive with a local video",
+       '--video myvideo.mp4 --name MyPack --creator Han')
+    ex("YouTube URL with time range",
+       '--video "https://youtu.be/xxxx" --start 10 --end 40 --name BeachPack')
+    ex("With custom BGM and compression",
+       '--video clip.mp4 --name CoolPack --compress pillow --pillow-quality high')
+    ex("With a loading-background folder",
+       '--video clip.mp4 --name CoolPack --loading-bg ./my_screens/')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -929,7 +1017,7 @@ def _parse_args(argv):
     while i < len(args):
         a = args[i]
         if a in ("-h", "--help"):
-            _print_banner(); print(_HELP); sys.exit(0)
+            _print_banner(); _print_help(); sys.exit(0)
         elif a in ("--interactive", "-i"):
             result["interactive"] = True; i += 1
         elif a in ("--quiet", "-q"):
