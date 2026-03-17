@@ -1,14 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat
 import urllib.request
 from pathlib import Path
 from abc import ABC, abstractmethod
-
-# ─────────────────────────────────────────────────────────────
-#  TOOL INSTALLER HELPERS
-# ─────────────────────────────────────────────────────────────
 
 def _tool_in_path(name: str) -> bool:
     try:
@@ -21,8 +14,6 @@ def _add_to_path(directory: str):
     d = str(directory)
     if d not in os.environ.get("PATH", ""):
         os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-
-# ── Windows ──────────────────────────────────────────────────
 
 def _install_ffmpeg_windows() -> bool:
     print("[ffmpeg] Trying winget...")
@@ -50,14 +41,12 @@ def _install_ffmpeg_windows() -> bool:
             print("[ffmpeg] Installed via choco ✓"); return True
     except Exception: pass
 
-    # Direct ZIP download (ffmpeg-release-essentials from GitHub/BtbN)
     print("[ffmpeg] Downloading from GitHub (BtbN release)...")
     try:
         import urllib.request, zipfile as zf
         api_url = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
         with urllib.request.urlopen(api_url, timeout=30) as resp:
             data = json.loads(resp.read())
-        # pick win64-gpl-shared essentials
         asset_url = next(
             a["browser_download_url"] for a in data["assets"]
             if "win64" in a["name"] and "gpl" in a["name"] and a["name"].endswith(".zip")
@@ -71,7 +60,6 @@ def _install_ffmpeg_windows() -> bool:
         with zf.ZipFile(zip_path) as z:
             z.extractall(tmp_dir)
 
-        # find ffmpeg.exe inside extracted folder
         ffmpeg_exe = next(tmp_dir.rglob("ffmpeg.exe"), None)
         if ffmpeg_exe:
             install_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ffmpeg_bin"
@@ -82,7 +70,6 @@ def _install_ffmpeg_windows() -> bool:
                     shutil.copy2(src, install_dir / exe)
             _add_to_path(str(install_dir))
 
-            # Persist to user PATH via reg
             try:
                 import winreg
                 with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -101,7 +88,6 @@ def _install_ffmpeg_windows() -> bool:
 
     return False
 
-
 def _install_ytdlp_windows() -> bool:
     print("[yt-dlp] Trying pip...")
     try:
@@ -109,10 +95,8 @@ def _install_ytdlp_windows() -> bool:
             [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        # pip installs yt-dlp script into Scripts folder – should already be in PATH
         if _tool_in_path("yt-dlp"):
             print("[yt-dlp] Installed via pip ✓"); return True
-        # Fallback: locate & add Scripts dir
         scripts = Path(sys.executable).parent / "Scripts"
         if (scripts / "yt-dlp.exe").exists():
             _add_to_path(str(scripts))
@@ -137,7 +121,6 @@ def _install_ytdlp_windows() -> bool:
             print("[yt-dlp] Installed via scoop ✓"); return True
     except Exception: pass
 
-    # Direct .exe download
     print("[yt-dlp] Downloading .exe from GitHub...")
     try:
         exe_url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
@@ -162,13 +145,9 @@ def _install_ytdlp_windows() -> bool:
 
     return False
 
-
-# ── macOS ─────────────────────────────────────────────────────
-
 def _install_ffmpeg_macos() -> bool:
     print("[ffmpeg] Trying brew...")
     try:
-        # Ensure brew is on PATH
         for bp in ["/opt/homebrew/bin", "/usr/local/bin"]:
             _add_to_path(bp)
         r = subprocess.run(["brew", "install", "ffmpeg"], timeout=600, capture_output=True)
@@ -183,7 +162,6 @@ def _install_ffmpeg_macos() -> bool:
             print("[ffmpeg] Installed via MacPorts ✓"); return True
     except Exception: pass
 
-    # Static build from evermeet.cx
     print("[ffmpeg] Downloading static build from evermeet.cx...")
     try:
         url = "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"
@@ -207,7 +185,6 @@ def _install_ffmpeg_macos() -> bool:
 
     return False
 
-
 def _install_ytdlp_macos() -> bool:
     print("[yt-dlp] Trying pip...")
     try:
@@ -228,7 +205,6 @@ def _install_ytdlp_macos() -> bool:
             print("[yt-dlp] Installed via brew ✓"); return True
     except Exception: pass
 
-    # Binary download
     print("[yt-dlp] Downloading binary from GitHub...")
     try:
         url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
@@ -245,11 +221,7 @@ def _install_ytdlp_macos() -> bool:
 
     return False
 
-
-# ── Linux ─────────────────────────────────────────────────────
-
 def _install_ffmpeg_linux() -> bool:
-    # apt / apt-get
     for pm in [["apt-get", "install", "-y", "ffmpeg"],
                ["apt",     "install", "-y", "ffmpeg"]]:
         print(f"[ffmpeg] Trying {pm[0]}...")
@@ -273,7 +245,6 @@ def _install_ffmpeg_linux() -> bool:
                 print(f"[ffmpeg] Installed via {pm[0]} ✓"); return True
         except Exception: pass
 
-    # snap
     print("[ffmpeg] Trying snap...")
     try:
         subprocess.run(["sudo", "snap", "install", "ffmpeg"],
@@ -283,7 +254,6 @@ def _install_ffmpeg_linux() -> bool:
             print("[ffmpeg] Installed via snap ✓"); return True
     except Exception: pass
 
-    # Static binary (John Van Sickle)
     print("[ffmpeg] Downloading static build (John Van Sickle)...")
     try:
         import platform
@@ -311,7 +281,6 @@ def _install_ffmpeg_linux() -> bool:
 
     return False
 
-
 def _install_ytdlp_linux() -> bool:
     print("[yt-dlp] Trying pip...")
     try:
@@ -337,7 +306,6 @@ def _install_ytdlp_linux() -> bool:
                 print(f"[yt-dlp] Installed via {pm[0]} ✓"); return True
         except Exception: pass
 
-    # Binary download
     print("[yt-dlp] Downloading binary from GitHub...")
     try:
         url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
@@ -354,9 +322,6 @@ def _install_ytdlp_linux() -> bool:
 
     return False
 
-
-# ── Dispatcher ────────────────────────────────────────────────
-
 def _ensure_tool(name: str) -> bool:
     if _tool_in_path(name):
         print(f"[CHECK] {name} ✓ already in PATH")
@@ -366,7 +331,6 @@ def _ensure_tool(name: str) -> bool:
 
     is_win   = sys.platform.startswith("win")
     is_mac   = sys.platform.startswith("darwin")
-    # Linux / other
 
     if name == "ffmpeg":
         if   is_win: ok = _install_ffmpeg_windows()
@@ -396,10 +360,6 @@ def _ensure_tool(name: str) -> bool:
         print(f"        → {urls.get(name, 'https://github.com/yt-dlp/yt-dlp')}")
     return ok
 
-
-# ─────────────────────────────────────────────────────────────
-#  AUTO-INSTALL BOOTSTRAP
-# ─────────────────────────────────────────────────────────────
 def _bootstrap_install():
     pip_pkgs = [
         ("PyQt5",    "PyQt5"),
@@ -446,9 +406,6 @@ def _bootstrap_install():
 
 _bootstrap_install()
 
-# ─────────────────────────────────────────────────────────────
-#  Imports sau bootstrap
-# ─────────────────────────────────────────────────────────────
 import requests
 import psutil
 from PIL import Image, ImageFilter
@@ -464,9 +421,6 @@ from PyQt5.QtWidgets import (
     QCheckBox,
 )
 
-# ─────────────────────────────────────────────────────────────
-#  Constants
-# ─────────────────────────────────────────────────────────────
 WINDOW_TITLE        = "Horizon UI Extension Studio"
 MAX_FRAMES          = 100
 DEFAULT_FPS         = 20
@@ -480,13 +434,8 @@ UI_DIR              = "ui"
 
 CONTAINER_BG_URL    = "https://tubeo5866.github.io/files/hrzn_container_background.zip"
 
-FRAME_PREFIX_ANIM   = "hans_common_"   # hrzn_animated_background/hans_common_xxx.png
-# hrzn_loading_background/xxx.png  (plain number)
+FRAME_PREFIX_ANIM   = "hans_common_"
 
-
-# ─────────────────────────────────────────────────────────────
-#  Compressors (giữ nguyên từ bản gốc, thêm Lossless)
-# ─────────────────────────────────────────────────────────────
 class Compressor(ABC):
     def __init__(self, cfg, log_func):
         self.cfg = cfg
@@ -621,18 +570,14 @@ class ImageCompressrCompressor(Compressor):
 
 class CompressorIoCompressor(Compressor):
     def compress(self, frame_dir: Path):
-        # Simplified – reuses original logic
         self.log("CompressorIo: using Pillow as fallback (Selenium optional).")
         PillowCompressor(self.cfg, self.log).compress(frame_dir)
 
-
-# ─────────────────────────────────────────────────────────────
-#  IMAGE ORDER DIALOG
-# ─────────────────────────────────────────────────────────────
 class ImageOrderDialog(QDialog):
+
     def __init__(self, images: list, parent=None):
         super().__init__(parent)
-        self._images = list(images)   # list[Path]
+        self._images = list(images)
         self.setWindowTitle("Set Loading Background Image Order")
         self.setMinimumSize(520, 560)
         self._build()
@@ -643,7 +588,6 @@ class ImageOrderDialog(QDialog):
         layout.setSpacing(8)
         layout.setContentsMargins(14, 14, 14, 12)
 
-        # ── Header ──
         hdr = QLabel("🖼  Drag to reorder — top = frame 1, bottom = last frame")
         hdr.setStyleSheet("font-weight:bold; font-size:12px;")
         layout.addWidget(hdr)
@@ -656,7 +600,6 @@ class ImageOrderDialog(QDialog):
         sub.setStyleSheet("color:#555; margin-bottom:4px;")
         layout.addWidget(sub)
 
-        # ── List widget ──
         self._list = QListWidget()
         self._list.setDragDropMode(QAbstractItemView.InternalMove)
         self._list.setDefaultDropAction(QtCore.Qt.MoveAction)
@@ -673,7 +616,6 @@ class ImageOrderDialog(QDialog):
             item = QListWidgetItem()
             item.setText(f"  {img_path.name}")
             item.setData(QtCore.Qt.UserRole, str(img_path))
-            # Thumbnail
             try:
                 px = QPixmap(str(img_path)).scaled(
                     64, 64,
@@ -687,12 +629,10 @@ class ImageOrderDialog(QDialog):
 
         layout.addWidget(self._list, stretch=1)
 
-        # ── Row number column hint ──
         note = QLabel("💡 Tip: select an item then use ↑ / ↓ buttons to move it.")
         note.setStyleSheet("color:#888; font-size:10px;")
         layout.addWidget(note)
 
-        # ── Up / Down buttons ──
         ud_row = QHBoxLayout()
         btn_up = QPushButton("▲  Move Up")
         btn_dn = QPushButton("▼  Move Down")
@@ -703,11 +643,9 @@ class ImageOrderDialog(QDialog):
         ud_row.addWidget(btn_up); ud_row.addWidget(btn_dn); ud_row.addStretch()
         layout.addLayout(ud_row)
 
-        # ── Separator ──
         line = QFrame(); line.setFrameShape(QFrame.HLine); line.setFrameShadow(QFrame.Sunken)
         layout.addWidget(line)
 
-        # ── OK / Cancel ──
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_cancel = QPushButton("✖  Cancel")
@@ -748,16 +686,11 @@ class ImageOrderDialog(QDialog):
             result.append(Path(item.data(QtCore.Qt.UserRole)))
         return result
 
-
-# ─────────────────────────────────────────────────────────────
-#  Worker
-# ─────────────────────────────────────────────────────────────
 class Worker(QtCore.QThread):
     log_signal         = QtCore.pyqtSignal(str)
     done_signal        = QtCore.pyqtSignal(bool, str)
     progress_signal    = QtCore.pyqtSignal(int)
-    # Phát lên main thread để hiện ImageOrderDialog; main thread trả kết quả qua _deliver_order
-    show_order_dialog  = QtCore.pyqtSignal(list)   # list[str] paths
+    show_order_dialog  = QtCore.pyqtSignal(list)
 
     def __init__(self, cfg):
         super().__init__()
@@ -790,7 +723,6 @@ class Worker(QtCore.QThread):
                 elif p.exists(): p.unlink()
             except Exception: pass
 
-    # ── helpers ──────────────────────────────────────────────
     def _ensure_dir(self, p: Path):
         p.mkdir(parents=True, exist_ok=True)
 
@@ -820,7 +752,6 @@ class Worker(QtCore.QThread):
         if mem.percent > MEMORY_THRESHOLD:
             self.log(f"⚠️ High memory: {mem.percent:.0f}%")
 
-    # ── download & extract ───────────────────────────────────
     def _download_youtube(self, url: str, output_dir: Path) -> Path:
         if self._stop_requested: raise RuntimeError("Cancelled.")
         self._ensure_dir(output_dir)
@@ -890,7 +821,6 @@ class Worker(QtCore.QThread):
         self._ensure_dir(dst)
 
         n = min(int(self.cfg.get("load_frames", MAX_FRAMES)), MAX_FRAMES)
-        # extract first, then rename to plain numbers
         tmp_pat = dst / "load_%03d.png"
         fps = self.cfg.get("fps", DEFAULT_FPS)
 
@@ -903,7 +833,6 @@ class Worker(QtCore.QThread):
         args += ["-i", str(video), "-vf", f"fps={fps}", "-frames:v", str(n), str(tmp_pat)]
         self._run_ffmpeg(args)
 
-        # rename load_001.png → 1.png, load_002.png → 2.png …
         for f in sorted(dst.glob("load_*.png")):
             m = re.match(r"load_(\d+)\.png", f.name)
             if m:
@@ -921,7 +850,6 @@ class Worker(QtCore.QThread):
         src = frames[0]
         blur_out = anim_dir / "blur.png"
 
-        # Try OpenCV first
         try:
             import cv2
             img = cv2.imread(str(src))
@@ -933,7 +861,6 @@ class Worker(QtCore.QThread):
         except Exception as e:
             self.log(f"OpenCV blur failed: {e}, falling back to Pillow...")
 
-        # Fallback: Pillow
         im = Image.open(src)
         im.filter(ImageFilter.GaussianBlur(radius=15)).save(blur_out)
         self.log(f"blur.png created via Pillow → {blur_out}")
@@ -966,7 +893,6 @@ class Worker(QtCore.QThread):
             raise FileNotFoundError(f"BGM file not found: {src}")
 
         bgm_name = re.sub(r'[\\/:*?"<>|]', "_", src.stem).strip() or "background_music"
-        # Update cfg so sound_definitions.json uses the correct name
         self.cfg["bgm_name"] = bgm_name
 
         dst_dir = pack_root / SOUNDS_DIR
@@ -981,7 +907,6 @@ class Worker(QtCore.QThread):
             self._run_ffmpeg(["-y", "-i", str(src), "-acodec", "libvorbis", "-q:a", "6", str(dst)])
             self.log("BGM conversion done \u2713")
 
-    # ── JSON generators ──────────────────────────────────────
     def _gen_bg_anim_json(self, anim_dir: Path, pack_root: Path):
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
         n = len(frames)
@@ -1004,7 +929,6 @@ class Worker(QtCore.QThread):
             trailing  = "" if i < n else ""
             lines.append(f'  "{key}@hrzn_ui_wextension.hans_anim_base":{{"$anm_offset": [ "0px", "{y_pct}" ],"next": "@hrzn_ui_wextension.{next_key}"}},')
 
-        # remove trailing comma from last line
         lines[-1] = lines[-1].rstrip(",")
 
         content = "{\n" + "\n".join(lines) + "\n}"
@@ -1021,13 +945,11 @@ class Worker(QtCore.QThread):
             self.log("⚠️ No loading frames found, skipping .hrzn_public_bg_load.json")
             return
 
-        # controls list
         ctrl_lines = []
         for i in range(1, n + 1):
             trailing = "," if i < n else ""
             ctrl_lines.append(f'      {{ "{i}@hrzn_ui_load_wextension.img": {{ "$img": "{i}" }} }}{trailing}')
 
-        # animation frames
         anim_lines = []
         for i in range(1, n + 1):
             key      = f"{i:02d}"
@@ -1204,12 +1126,10 @@ class Worker(QtCore.QThread):
             return
 
         dst = pack_root / LOADING_BG_DIR
-        # Xóa sạch folder cũ trước khi copy để tránh lẫn ảnh từ nguồn khác
         if dst.exists():
             shutil.rmtree(dst)
         dst.mkdir(parents=True, exist_ok=True)
 
-        # Check nếu tất cả stem là số nguyên liên tục
         def _all_numeric(files):
             try:
                 nums = [int(f.stem) for f in files]
@@ -1219,7 +1139,6 @@ class Worker(QtCore.QThread):
 
         nums = _all_numeric(images)
         if nums is not None:
-            # Đã đúng thứ tự số → copy thẳng, đổi tên về 1, 2, 3 ... (chuẩn hóa)
             for new_idx, img in enumerate(
                 sorted(images, key=lambda f: int(f.stem)), start=1
             ):
@@ -1228,7 +1147,6 @@ class Worker(QtCore.QThread):
                 self.log(f"Copied {img.name} → {dst_name.name}")
             self.log(f"✓ {len(images)} loading BG images copied (numeric order).")
         else:
-            # Tên không phải số → yêu cầu user sắp xếp
             self.log("Loading BG images are not numerically named – requesting order from user...")
             ordered = self._request_image_order(images)
             if ordered is None:
@@ -1240,12 +1158,11 @@ class Worker(QtCore.QThread):
                 self.log(f"Copied {img.name} → {dst_name.name}")
             self.log(f"✓ {len(ordered)} loading BG images copied (custom order).")
 
-    # Signal để giao tiếp với UI thread khi cần dialog
-    _order_request_signal  = QtCore.pyqtSignal(list)        # gửi list Path → UI
-    _order_response_signal = QtCore.pyqtSignal(list)        # UI trả về list Path đã sắp xếp
+    _order_request_signal  = QtCore.pyqtSignal(list)
+    _order_response_signal = QtCore.pyqtSignal(list)
 
     def _deliver_order(self, ordered: list):
-        self._order_result = ordered   # list[Path] hoặc []
+        self._order_result = ordered
         self._order_event.set()
 
     def _request_image_order(self, images: list):
@@ -1253,16 +1170,13 @@ class Worker(QtCore.QThread):
         self._order_result = None
         self._order_event  = threading.Event()
 
-        # Phát signal — main thread nhận, hiện dialog, gọi _deliver_order
         self.show_order_dialog.emit([str(p) for p in images])
 
-        # Block worker thread đến khi main thread báo xong
         self._order_event.wait()
 
         result = self._order_result
         return result if result else None
 
-    # ── compress helper ──────────────────────────────────────
     def _get_compressor(self, method: str):
         m = {
             "tinypng": TinyPNGCompressor, "imagecompressr": ImageCompressrCompressor,
@@ -1274,7 +1188,6 @@ class Worker(QtCore.QThread):
         cls = m.get(method.lower())
         return cls(self.cfg, self.log) if cls else None
 
-    # ── MAIN PROCESS ─────────────────────────────────────────
     def process(self):
         self._monitor_memory()
         total_steps = 14
@@ -1295,13 +1208,11 @@ class Worker(QtCore.QThread):
         self._temp_files.append(pack_root)
         tick("Pack folder created")
 
-        # ── 1. Folder skeleton ─────────────────────────────
         for d in [ANIM_BG_DIR, LOADING_BG_DIR, CONTAINER_BG_DIR,
                   SOUNDS_DIR, UI_DIR]:
             self._ensure_dir(pack_root / d)
         tick("Folder structure created")
 
-        # ── 2. Resolve video ───────────────────────────────
         video_input = self.cfg["video_path"]
         delete_after = False
         if re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
@@ -1316,11 +1227,9 @@ class Worker(QtCore.QThread):
             self.cfg["is_trimmed"] = False
         tick("Video ready")
 
-        # ── 3. Extract animated background frames ──────────
         anim_dir = self._extract_frames_anim(video, pack_root)
         tick("Animated background frames extracted")
 
-        # ── 4. Extract / copy loading background ──────────
         if self.cfg.get("loading_bg_folder", "").strip():
             self._copy_loading_bg_folder(pack_root)
             load_dir = pack_root / LOADING_BG_DIR
@@ -1329,11 +1238,9 @@ class Worker(QtCore.QThread):
             load_dir = self._extract_frames_loading(video, pack_root)
             tick("Loading background frames extracted")
 
-        # ── 5. blur.png ────────────────────────────────────
         self._make_blur_png(anim_dir)
         tick("blur.png created")
 
-        # ── 6. Compress anim frames ────────────────────────
         method = self.cfg.get("compress_method", "lossless").lower()
         compressor = self._get_compressor(method)
         if compressor:
@@ -1341,17 +1248,14 @@ class Worker(QtCore.QThread):
             compressor.compress(anim_dir)
         tick("Anim frames compressed")
 
-        # ── 7. Compress loading frames ─────────────────────
         if compressor:
             self.log(f"Compressing loading frames via {method}...")
             compressor.compress(load_dir)
         tick("Loading frames compressed")
 
-        # ── 8. Download container background ───────────────
         self._download_container_bg(pack_root)
         tick("Container background downloaded")
 
-        # ── 9. Audio ───────────────────────────────────────
         if self.cfg.get("bgm_file", "").strip():
             self._copy_bgm_file(pack_root)
         elif re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
@@ -1360,7 +1264,6 @@ class Worker(QtCore.QThread):
             self._download_audio(video, pack_root)
         tick("Audio prepared")
 
-        # ── 10. Generate JSONs ─────────────────────────────
         self._gen_bg_anim_json(anim_dir, pack_root)
         self._gen_bg_load_json(load_dir, pack_root)
         self._gen_manifest(pack_root)
@@ -1369,7 +1272,6 @@ class Worker(QtCore.QThread):
         self._gen_sound_definitions(pack_root)
         tick("JSON files generated")
 
-        # ── 11. Pack to .mcpack (ZIP) ──────────────────────
         zip_base = output_folder / (ext_name + ".mcpack")
         if zip_base.exists(): zip_base.unlink()
         self.log(f"Packing → {zip_base}")
@@ -1378,7 +1280,6 @@ class Worker(QtCore.QThread):
         if zip_tmp.exists(): zip_tmp.rename(zip_base)
         tick("mcpack created")
 
-        # ── 12. Cleanup ────────────────────────────────────
         shutil.rmtree(pack_root, ignore_errors=True)
         self._temp_files.remove(pack_root)
         if delete_after:
@@ -1389,10 +1290,6 @@ class Worker(QtCore.QThread):
         self.progress_signal.emit(100)
         return True
 
-
-# ─────────────────────────────────────────────────────────────
-#  Main Window
-# ─────────────────────────────────────────────────────────────
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -1412,9 +1309,6 @@ class MainWindow(QWidget):
                 self.append_log(f"⚠️ {tool} NOT found in PATH – some features may fail.")
 
     def _build_ui(self):
-        # ═══════════════════════════════════════════════════════
-        #  Root: LEFT settings panel  |  RIGHT log panel
-        # ═══════════════════════════════════════════════════════
         from PyQt5.QtWidgets import QSplitter
         from PyQt5.QtCore import Qt as _Qt
 
@@ -1426,9 +1320,6 @@ class MainWindow(QWidget):
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
-        # ───────────────────────────────────────────────────────
-        #  LEFT: scrollable settings + progress + buttons
-        # ───────────────────────────────────────────────────────
         left_outer = QWidget()
         left_outer.setMinimumWidth(360)
         left_vbox = QVBoxLayout(left_outer)
@@ -1471,7 +1362,6 @@ class MainWindow(QWidget):
                 g.addWidget(widget, r, 1, 1, 2)
             r += 1
 
-        # ── OUTPUT ──────────────────────────────────────────
         _sec("OUTPUT")
         self.inp_output = QLineEdit(str(Path.home() / "HorizonExtensions"))
         btn_o = QPushButton("Browse…"); btn_o.clicked.connect(self.browse_output)
@@ -1483,7 +1373,6 @@ class MainWindow(QWidget):
         self.inp_creator = QLineEdit("Unknown")
         _row("Creator Name:", self.inp_creator)
 
-        # ── VIDEO SOURCE ─────────────────────────────────────
         _sec("VIDEO SOURCE")
         self.inp_video = QLineEdit()
         self.inp_video.setPlaceholderText("Local file or YouTube URL")
@@ -1505,7 +1394,6 @@ class MainWindow(QWidget):
         self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, MAX_FRAMES); self.spn_load_frames.setValue(MAX_FRAMES)
         _row("Loading Frames (max 100):", self.spn_load_frames)
 
-        # ── ASSETS ───────────────────────────────────────────
         _sec("ASSETS")
         self.inp_bgm = QLineEdit()
         self.inp_bgm.setPlaceholderText("(optional — leave blank to extract from video)")
@@ -1523,7 +1411,6 @@ class MainWindow(QWidget):
         btn_lbg = QPushButton("Browse…"); btn_lbg.clicked.connect(self.browse_loading_bg)
         _row("Loading Background Folder:", self.inp_loading_bg, btn_lbg)
 
-        # ── COMPRESSION ──────────────────────────────────────
         _sec("COMPRESSION")
         self.cmb_compress = QComboBox()
         self._compress_methods = [
@@ -1547,27 +1434,22 @@ class MainWindow(QWidget):
                 fl.addRow(lb, wg)
             return w
 
-        # 0 – Lossless
         _lw = QWidget(); _ll = QLabel("No configuration needed.")
         _ll.setStyleSheet("color:grey;font-style:italic;")
         QVBoxLayout(_lw).addWidget(_ll); self._api_stack.addWidget(_lw)
 
-        # 1 – Pillow
         self.cmb_pillow_q = QComboBox()
         self.cmb_pillow_q.addItems(["Low", "Medium", "High", "Maximum"])
         self.cmb_pillow_q.setCurrentText("High")
         self._api_stack.addWidget(make_panel([("Quality:", self.cmb_pillow_q)]))
 
-        # 2 – FFmpeg
         self.spn_ff_qv = QSpinBox(); self.spn_ff_qv.setRange(1, 31); self.spn_ff_qv.setValue(1)
         self._api_stack.addWidget(make_panel([("QV (1=best, 31=worst):", self.spn_ff_qv)]))
 
-        # 3 – TinyPNG
         self.inp_tinify = QLineEdit(); self.inp_tinify.setPlaceholderText("TinyPNG API Key")
         self.inp_tinify.setEchoMode(QLineEdit.Password)
         self._api_stack.addWidget(make_panel([("API Key:", self.inp_tinify)]))
 
-        # 4 – Kraken
         self.inp_kraken  = QLineEdit(); self.inp_kraken.setPlaceholderText("API Key")
         self.inp_kraken.setEchoMode(QLineEdit.Password)
         self.inp_krakens = QLineEdit(); self.inp_krakens.setPlaceholderText("API Secret")
@@ -1579,7 +1461,6 @@ class MainWindow(QWidget):
             ("Quality:",    self.spn_kraken_q),
         ]))
 
-        # 5 – ImageKit
         self.inp_imagekit  = QLineEdit(); self.inp_imagekit.setPlaceholderText("Public Key")
         self.inp_imagekits = QLineEdit(); self.inp_imagekits.setPlaceholderText("Private Key")
         self.inp_imagekits.setEchoMode(QLineEdit.Password)
@@ -1592,7 +1473,6 @@ class MainWindow(QWidget):
             ("Quality:",      self.inp_imagekitq),
         ]))
 
-        # 6 – Cloudinary
         self.inp_cloudinary  = QLineEdit(); self.inp_cloudinary.setPlaceholderText("Cloud Name")
         self.inp_cloudinaryk = QLineEdit(); self.inp_cloudinaryk.setPlaceholderText("API Key")
         self.inp_cloudinaryk.setEchoMode(QLineEdit.Password)
@@ -1608,12 +1488,10 @@ class MainWindow(QWidget):
             ("Quality:",     self.cmb_cloudinaryq),
         ]))
 
-        # 7 – Imagecompressr
         _iw = QWidget(); _il = QLabel("Uses headless Chrome – no API key required.")
         _il.setStyleSheet("color:grey;font-style:italic;"); _il.setWordWrap(True)
         QVBoxLayout(_iw).addWidget(_il); self._api_stack.addWidget(_iw)
 
-        # 8 – Compressor.io
         _cw = QWidget(); _cl = QLabel("Uses headless Chrome – no API key required.")
         _cl.setStyleSheet("color:grey;font-style:italic;"); _cl.setWordWrap(True)
         QVBoxLayout(_cw).addWidget(_cl); self._api_stack.addWidget(_cw)
@@ -1629,7 +1507,6 @@ class MainWindow(QWidget):
         _ag.addWidget(self._api_stack)
         g.addWidget(api_grp, r, 0, 1, 3); r += 1
 
-        # ── Progress bar ─────────────────────────────────────
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(14)
         self.progress_bar.setTextVisible(False)
@@ -1639,7 +1516,6 @@ class MainWindow(QWidget):
         )
         left_vbox.addWidget(self.progress_bar)
 
-        # ── Buttons ───────────────────────────────────────────
         btn_bar = QHBoxLayout()
         btn_bar.setContentsMargins(4, 2, 4, 4)
         self.btn_run = QPushButton("▶  Build mcpack")
@@ -1668,9 +1544,6 @@ class MainWindow(QWidget):
 
         splitter.addWidget(left_outer)
 
-        # ───────────────────────────────────────────────────────
-        #  RIGHT: log + status line
-        # ───────────────────────────────────────────────────────
         right_widget = QWidget()
         right_widget.setMinimumWidth(280)
         right_vbox = QVBoxLayout(right_widget)
@@ -1708,7 +1581,6 @@ class MainWindow(QWidget):
         splitter.addWidget(right_widget)
         splitter.setSizes([420, 580])
 
-    # ── Slots ─────────────────────────────────────────────────
     def browse_video(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select Video", filter="Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)")
         if f: self.inp_video.setText(f)
@@ -1799,8 +1671,7 @@ class MainWindow(QWidget):
         if dlg.exec_() == dlg.Accepted:
             ordered = dlg.ordered_paths()
         else:
-            ordered = []   # empty = user cancelled
-        # Trả kết quả về worker (thread-safe vì worker đang block trên Event)
+            ordered = []
         if self.worker:
             self.worker._deliver_order(ordered)
 
@@ -1830,11 +1701,6 @@ class MainWindow(QWidget):
                 event.ignore()
         else:
             event.accept()
-
-
-# ─────────────────────────────────────────────────────────────
-#  LICENSE / TERMS OF USE DIALOG
-# ─────────────────────────────────────────────────────────────
 
 LICENSE_TEXT = """\
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -1937,16 +1803,15 @@ all terms listed below. If you do not agree, click "Decline" to exit.
 """
 
 _AGREED_FLAG = Path.home() / ".hrzn_studio_agreed"
+
 def _check_license(app: "QApplication") -> bool:
     if _AGREED_FLAG.exists():
         return True
-
 
     dlg = QDialog()
     dlg.setWindowTitle("Horizon UI Extension Studio — Terms of Use")
     dlg.setMinimumSize(780, 560)
     dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-    # Prevent closing via X without choosing
     dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowCloseButtonHint)
     dlg._accepted = False
 
@@ -1954,7 +1819,6 @@ def _check_license(app: "QApplication") -> bool:
     layout.setSpacing(10)
     layout.setContentsMargins(18, 18, 18, 14)
 
-    # ── Header ──
     header = QLabel("📜  Terms of Use & License Agreement")
     header_font = QFont()
     header_font.setPointSize(13)
@@ -1968,11 +1832,9 @@ def _check_license(app: "QApplication") -> bool:
     sub.setStyleSheet("color: #666; margin-bottom: 4px;")
     layout.addWidget(sub)
 
-    # ── Separator ──
     line = QFrame(); line.setFrameShape(QFrame.HLine); line.setFrameShadow(QFrame.Sunken)
     layout.addWidget(line)
 
-    # ── License text ──
     txt = QTextEdit()
     txt.setReadOnly(True)
     txt.setPlainText(LICENSE_TEXT)
@@ -1985,13 +1847,11 @@ def _check_license(app: "QApplication") -> bool:
     )
     layout.addWidget(txt, stretch=1)
 
-    # ── Scroll-to-bottom hint ──
     hint = QLabel("⬇  Scroll down to read the full agreement before accepting.")
     hint.setStyleSheet("color: #e07b00; font-size: 11px;")
     hint.setAlignment(Qt.AlignCenter)
     layout.addWidget(hint)
 
-    # Hide hint once user scrolled near the bottom
     def _on_scroll():
         sb = txt.verticalScrollBar()
         if sb.value() >= sb.maximum() - 10:
@@ -1999,11 +1859,10 @@ def _check_license(app: "QApplication") -> bool:
             chk.setEnabled(True)
     txt.verticalScrollBar().valueChanged.connect(_on_scroll)
 
-    # ── Checkbox ──
     chk = QCheckBox(
         "I have read and agree to the Terms of Use & License Agreement above."
     )
-    chk.setEnabled(False)   # enabled only after scrolling to bottom
+    chk.setEnabled(False)
     chk.setStyleSheet("font-weight: bold; margin-top: 4px;")
 
     def _on_check(state):
@@ -2011,7 +1870,6 @@ def _check_license(app: "QApplication") -> bool:
     chk.stateChanged.connect(_on_check)
     layout.addWidget(chk)
 
-    # ── Buttons ──
     btn_layout = QHBoxLayout()
     btn_layout.addStretch()
 
@@ -2036,10 +1894,8 @@ def _check_license(app: "QApplication") -> bool:
     btn_layout.addWidget(btn_agree)
     layout.addLayout(btn_layout)
 
-    # ── Wire buttons ──
     def _agree():
         dlg._accepted = True
-        # Write flag file with timestamp
         try:
             import datetime
             _AGREED_FLAG.write_text(
@@ -2058,7 +1914,6 @@ def _check_license(app: "QApplication") -> bool:
     btn_agree.clicked.connect(_agree)
     btn_decline.clicked.connect(_decline)
 
-    # Closing via X = decline
     def _close_event(event):
         dlg._accepted = False
         event.accept()
@@ -2067,8 +1922,6 @@ def _check_license(app: "QApplication") -> bool:
     dlg.exec_()
     return dlg._accepted
 
-
-# ─────────────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
 
