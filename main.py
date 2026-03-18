@@ -1,7 +1,6 @@
 print("[───────────────────────────────────────────────────────")
 
-import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat
-import urllib.request
+import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat, urllib.request
 from pathlib import Path
 from abc import ABC, abstractmethod
 
