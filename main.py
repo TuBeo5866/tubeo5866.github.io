@@ -1,4 +1,4 @@
-print("[───────────────────────────────────────────────────────")
+print("────────────────────────────────────────────────────────")
 
 import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat, urllib.request
 from pathlib import Path
@@ -427,11 +427,9 @@ def _install_ytdlp_linux() -> bool:
 
 def _ensure_tool(name: str) -> bool:
     if _ffmpeg_in_path(name):
-        print(f"[CHECK] {name} ✓ already in PATH")
         return True
 
     if _ytdlp_in_path(name):
-        print(f"[CHECK] {name} ✓ already in PATH")
         return True
 
     print(f"\n[INSTALL] {name} not found – attempting automatic installation...")
