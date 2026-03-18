@@ -439,7 +439,8 @@ def _bootstrap_install():
     _ensure_tool("yt-dlp")
     print("[BOOTSTRAP] ── Done ──────────────────────────────\n")
 
-_bootstrap_install()
+if not ({"-h", "--help"} & set(sys.argv[1:])):
+    _bootstrap_install()
 
 import requests
 import psutil
