@@ -1,5 +1,3 @@
-print("────────────────────────────────────────────────────────")
-
 import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat, urllib.request
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -466,6 +464,7 @@ def _ensure_tool(name: str) -> bool:
     return ok
 
 def _bootstrap_install():
+    print("────────────────────────────────────────────────────────")
     pip_pkgs = [
         ("PyQt5",    "PyQt5"),
         ("PIL",   "Pillow"),
