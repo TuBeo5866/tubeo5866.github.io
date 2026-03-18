@@ -1,3 +1,5 @@
+print("[───────────────────────────────────────────────────────")
+
 import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipfile, logging, stat
 import urllib.request
 from pathlib import Path
@@ -497,7 +499,7 @@ def _bootstrap_install():
             except Exception as e:
                 print(f"[PIP] {pkg_name} failed: {e}")
 
-    print("[BOOTSTRAP] ── Python packages ──────────────────")
+    print("[BOOTSTRAP] ── Python packages ───────────────────")
     for imp, pkg in pip_pkgs:
         pip_install(imp, pkg)
 
