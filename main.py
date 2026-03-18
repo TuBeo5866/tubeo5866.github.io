@@ -1852,7 +1852,7 @@ all terms listed below. If you do not agree, click "Decline" to exit.
 ───────────────────────────────────────────────────────────────────────────────
 1. DEFINITIONS
 ───────────────────────────────────────────────────────────────────────────────
-  • "Software"    — Horizon UI Extension Studio (this application).
+  • "Software"    — Horizon UI Extension Studio, made by TuBeo5866.
   • "Extension"   — Any .mcpack file produced by the Software.
   • "Original UI" — HorizonUI by Han's404 (YouTube: @zxyn404).
   • "You / User"  — Any individual or entity running the Software.
@@ -1865,7 +1865,8 @@ all terms listed below. If you do not agree, click "Decline" to exit.
     (a) Create Extensions for personal use and private distribution.
     (b) Share Extensions freely, PROVIDED the original credit is preserved
         (see Section 4).
-    (c) Modify the Software's source code for your own non-commercial builds.
+    (c) Modify the Software's source code for your own non-commercial builds
+        without permission.
 
 ───────────────────────────────────────────────────────────────────────────────
 3. RESTRICTIONS
