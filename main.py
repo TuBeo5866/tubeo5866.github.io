@@ -530,7 +530,7 @@ if not _IS_HELP:
         QCheckBox,
     )
 
-WINDOW_TITLE        = "Horizon UI Extension Studio - Made by TuBeo5866"
+WINDOW_TITLE        = "Horizon UI Extension Studio - Made by TuBeo5866 - ⚠⚠ BEDROCK ONLY! ⚠⚠"
 MAX_FRAMES          = 100
 DEFAULT_FPS         = 20
 MEMORY_THRESHOLD    = 80
