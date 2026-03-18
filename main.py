@@ -1840,7 +1840,7 @@ class MainWindow(QWidget):
 
 LICENSE_TEXT = """\
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║           HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE             ║
+║            HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Last updated: 2025
