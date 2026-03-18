@@ -1,6 +1,21 @@
-import os, sys, re, json, shutil, uuid, subprocess, tempfile, zipfile, stat, urllib.request, logging, time
+import os
+import sys
+import re
+import json
+import shutil
+import uuid
+import subprocess
+import tempfile
+import zipfile
+import stat
+import urllib.request
+import logging
+import time
 from pathlib import Path
 
+                                                                               
+                                                                
+                                                                               
 def _supports_colour():
     if sys.platform.startswith("win"):
         try:
@@ -11,7 +26,6 @@ def _supports_colour():
         except Exception:
             return False
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-
 
 _USE_COLOUR = _supports_colour()
 
@@ -28,12 +42,16 @@ C_DIM    = "\033[2m"    if _USE_COLOUR else ""
 def _c(text, *codes):
     return "".join(codes) + str(text) + C_RESET if _USE_COLOUR else str(text)
 
+                                                                               
+         
+                                                                               
 _quiet_mode = False
 
 def _log(msg, *, level="info"):
     if _quiet_mode and level == "info":
         return
     if level == "info":
+                                       
         print(_c("  " + msg, C_CYAN, C_DIM))
     elif level == "ok":
         print(_c("✓  " + msg, C_GREEN, C_BOLD))
@@ -46,13 +64,16 @@ def _log(msg, *, level="info"):
     else:
         print(msg)
 
+                                                                               
+                                                       
+                                                                               
+
 def _ffmpeg_in_path(name="ffmpeg"):
     try:
         subprocess.check_output([name, "-version"], stderr=subprocess.DEVNULL)
         return True
     except Exception:
         return False
-
 
 def _ytdlp_in_path(name="yt-dlp"):
     try:
@@ -61,12 +82,10 @@ def _ytdlp_in_path(name="yt-dlp"):
     except Exception:
         return False
 
-
 def _add_to_path(directory):
     d = str(directory)
     if d not in os.environ.get("PATH", ""):
         os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-
 
 def _get_ffmpeg_exe():
     if _ffmpeg_in_path("ffmpeg"):
@@ -75,7 +94,6 @@ def _get_ffmpeg_exe():
     if appdata_ffmpeg.exists():
         return str(appdata_ffmpeg)
     return "ffmpeg"
-
 
 def _pip_install(import_name, pkg_name):
     try:
@@ -90,7 +108,6 @@ def _pip_install(import_name, pkg_name):
             _log(f"{pkg_name} installed", level="ok")
         except Exception as e:
             _log(f"Could not install {pkg_name}: {e}", level="warn")
-
 
 def _bootstrap(skip=False):
     if skip:
@@ -112,15 +129,16 @@ def _bootstrap(skip=False):
             _log(f"{tool} already available", level="ok")
         else:
             _log(f"{tool} not found – attempting install...", level="warn")
+                                                                               
             _try_install_tool(tool)
 
     _log("Bootstrap done.", level="ok")
-
 
 def _try_install_tool(name):
     is_win = sys.platform.startswith("win")
     is_mac = sys.platform.startswith("darwin")
     try:
+                                
         if name == "yt-dlp":
             subprocess.check_call(
                 [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
@@ -162,6 +180,10 @@ def _try_install_tool(name):
         pass
     _log(f"Could not install {name} automatically. Please install manually.", level="warn")
 
+                                                                               
+                                  
+                                                                               
+
 MAX_FRAMES       = 100
 DEFAULT_FPS      = 20
 ANIM_BG_DIR      = "hrzn_animated_background"
@@ -172,12 +194,12 @@ UI_DIR           = "ui"
 FRAME_PREFIX     = "hans_common_"
 CONTAINER_BG_URL = "https://tubeo5866.github.io/files/hrzn_container_background.zip"
 
-
 class CLIWorker:
     def __init__(self, cfg, quiet=False):
         self.cfg    = cfg
         self.quiet  = quiet
 
+                                                                               
     def log(self, msg):
         _log(msg, level="info")
 
@@ -193,6 +215,7 @@ class CLIWorker:
         if pct >= 100:
             print()
 
+                                                                               
     @staticmethod
     def _ensure(p):
         Path(p).mkdir(parents=True, exist_ok=True)
@@ -222,6 +245,7 @@ class CLIWorker:
     def _run_ff(self, args):
         return self._run([_get_ffmpeg_exe()] + args)
 
+                                                                               
     def _download_youtube(self, url, output_dir):
         self._ensure(output_dir)
         out_path = Path(output_dir) / "input_video.%(ext)s"
@@ -263,6 +287,7 @@ class CLIWorker:
         except Exception as e:
             self.log(f"⚠ Container background download failed: {e}")
 
+                                                                               
     def _extract_frames_anim(self, video, pack_root):
         dst = pack_root / ANIM_BG_DIR
         if dst.exists(): shutil.rmtree(dst)
@@ -305,6 +330,7 @@ class CLIWorker:
         self.log("Loading frames ready")
         return dst
 
+                                                                               
     def _make_blur(self, anim_dir):
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX}*.png"))
         if not frames:
@@ -324,6 +350,7 @@ class CLIWorker:
         Image.open(src).filter(ImageFilter.GaussianBlur(radius=15)).save(blur_out)
         self.log("blur.png created (Pillow)")
 
+                                                                                
     def _prep_audio(self, video, video_input, pack_root):
         bgm_file = self.cfg.get("bgm_file", "").strip()
         bgm_name = "bgm"
@@ -357,6 +384,7 @@ class CLIWorker:
             self._run_ff(["-y","-i",str(video),"-vn","-acodec","libvorbis",str(sounds_p)])
             self.log(f"Audio extracted → {sounds_p.name}")
 
+                                                                              
     def _compress(self, frame_dir, method, cfg):
         method = (method or "lossless").lower()
         if method in ("lossless", "none"):
@@ -435,6 +463,7 @@ class CLIWorker:
         else:
             self.log(f"Unknown compression method '{method}' – falling back to lossless")
 
+                                                                               
     def _gen_bg_anim_json(self, anim_dir, pack_root):
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX}*.png"))
         n = len(frames)
@@ -581,6 +610,7 @@ class CLIWorker:
         out.write_text(json.dumps(content, ensure_ascii=False, indent=3), encoding="utf-8")
         self.log("sounds/sound_definitions.json written")
 
+                                                                                
     def _copy_loading_bg_folder(self, pack_root):
         src_folder = self.cfg.get("loading_bg_folder","").strip()
         if not src_folder:
@@ -598,12 +628,13 @@ class CLIWorker:
         try:
             ordered = sorted(images, key=lambda f: int(f.stem))
         except ValueError:
-            ordered = images
+            ordered = images                                                    
         for idx, img in enumerate(ordered, start=1):
             shutil.copy2(img, dst / f"{idx}{img.suffix.lower()}")
         self.log(f"Loading BG: {len(ordered)} images copied from folder")
         return True
 
+                                                                               
     def process(self):
         total = 14
         step  = [0]
@@ -690,10 +721,17 @@ class CLIWorker:
         _log(f"\n✅  Done!  Output: {zip_base}", level="ok")
         return zip_base
 
+                                                                               
+                  
+                                                                               
+
 def _ask(prompt, default=None, required=False):
     suffix = f" [{default}]" if default else ""
     while True:
-        val = input(_c(f"  {prompt}{suffix}: ", C_CYAN)).strip()
+        try:
+            val = input(_c(f"  {prompt}{suffix}: ", C_CYAN)).strip()
+        except EOFError:
+            raise
         if not val and default is not None:
             return default
         if val:
@@ -701,7 +739,6 @@ def _ask(prompt, default=None, required=False):
         if not required:
             return ""
         _log("This field is required.", level="warn")
-
 
 def _choose(prompt, choices, default=None):
     print(_c(f"\n  {prompt}", C_BOLD))
@@ -719,7 +756,6 @@ def _choose(prompt, choices, default=None):
         except ValueError:
             pass
         _log("Invalid choice.", level="warn")
-
 
 def _interactive():
     _print_banner()
@@ -776,6 +812,10 @@ def _interactive():
     print()
     return cfg
 
+                                                                               
+               
+                                                                               
+
 def _print_banner():
     M  = C_MAG  + C_BOLD  if _USE_COLOUR else ""
     C  = C_CYAN + C_BOLD  if _USE_COLOUR else ""
@@ -790,14 +830,13 @@ def _print_banner():
 {M}  ║  {G}Original Creator : Han's404  |  @zxyn404 ( Han's ){R}{M}  ║{R}
 {M}  ╚══════════════════════════════════════════════════════════╝{R}""")
 
-
 def _print_help():
-    # colour shortcuts
-    S  = C_YELLOW + C_BOLD  if _USE_COLOUR else ""
-    F  = C_CYAN             if _USE_COLOUR else "" 
-    V  = C_GREEN            if _USE_COLOUR else "" 
-    D  = C_DIM              if _USE_COLOUR else ""
-    W  = C_BOLD             if _USE_COLOUR else ""
+                      
+    S  = C_YELLOW + C_BOLD  if _USE_COLOUR else ""                   
+    F  = C_CYAN             if _USE_COLOUR else ""                
+    V  = C_GREEN            if _USE_COLOUR else ""                    
+    D  = C_DIM              if _USE_COLOUR else ""                         
+    W  = C_BOLD             if _USE_COLOUR else ""               
     R  = C_RESET            if _USE_COLOUR else ""
     Y  = C_YELLOW           if _USE_COLOUR else ""
     G  = C_GREEN            if _USE_COLOUR else ""
@@ -815,11 +854,13 @@ def _print_help():
 
     def ex(comment, cmd):
         print(f"  {D}# {comment}{R}")
+                                                
         coloured_cmd = re.sub(r'(--[\w-]+|-[a-z])', f'{F}\\1{R}', cmd)
         coloured_cmd = re.sub(r'"([^"]+)"', f'{V}"\\1"{R}', coloured_cmd)
         print(f"  {W}python horizon_cli.py{R} {coloured_cmd}")
         print()
 
+                                                                             
     print(f"\n{W}usage:{R}")
     usage_flags = (
         f"  {W}horizon_cli.py{R} "
@@ -867,12 +908,14 @@ def _print_help():
     )
     print(usage_flags)
 
+                                                                             
     sec("options")
     flag("-h, --help",         "show this help message and exit")
     flag("--interactive, -i",  "Force interactive prompt mode")
     flag("--quiet, -q",        "Suppress detailed log output")
     flag("--skip-bootstrap",   "Skip automatic tool/package installation check")
 
+                                                                             
     sec("source")
     row("--video",       "PATH_OR_URL", "Local video file or YouTube URL")
     row("--start",       "TIME",        "Start time in seconds or mm:ss", "0")
@@ -881,11 +924,13 @@ def _print_help():
     row("--anim-frames", "N",           "Number of animated background frames, max 100", "100")
     row("--load-frames", "N",           "Number of loading background frames, max 100",  "100")
 
+                                                                             
     sec("output")
     row("--output, -o",  "DIR",  "Output directory",                    "~/HorizonExtensions")
     row("--name, -n",    "NAME", "Extension / pack name",               "MyExtension")
     row("--creator, -c", "NAME", "Creator name embedded in manifest",   "Unknown")
 
+                                                                             
     sec("assets")
     row("--bgm",         "FILE", "Background music file (.ogg/.mp3/.wav/…).\n"
                                  "                    Omit to extract from video.")
@@ -893,6 +938,7 @@ def _print_help():
                                  "                    Omit to extract from video.")
     row("--bgm-name",    "NAME", "BGM track name used in sound_definitions.json", "bgm")
 
+                                                                             
     sec("compression")
     methods = ["lossless", "pillow", "ffmpeg", "tinypng",
                "kraken",  "imagekit", "cloudinary", "compressor"]
@@ -920,6 +966,7 @@ def _print_help():
     print(f"  {F}--cloudinary-secret{R} {V}SECRET{R}")
     print(f"  {F}--cloudinary-quality{R} {V}{{auto,auto:best,auto:good,auto:eco,auto:low}}{R}")
 
+                                                                             
     sec("examples")
     ex("Interactive mode (recommended for first-time use)",
        "")
@@ -931,6 +978,10 @@ def _print_help():
        '--video clip.mp4 --name CoolPack --compress pillow --pillow-quality high')
     ex("With a loading-background folder",
        '--video clip.mp4 --name CoolPack --loading-bg ./my_screens/')
+
+                                                                               
+                                                  
+                                                                               
 
 def _parse_args(argv):
     args = argv[1:]
@@ -1012,6 +1063,10 @@ def _parse_args(argv):
 
     return result
 
+                                                                               
+             
+                                                                               
+
 def main():
     global _quiet_mode
 
@@ -1019,18 +1074,29 @@ def main():
 
     _quiet_mode = parsed.get("quiet", False)
     skip_boot   = parsed.get("skip_bootstrap", False)
-    interactive = parsed.get("interactive", False) or len(sys.argv) == 1
+
+                                                                                        
+    is_tty      = hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+    interactive = parsed.get("interactive", False) or (len(sys.argv) == 1 and is_tty)
 
     _print_banner()
     _bootstrap(skip=skip_boot)
 
     if interactive:
-        cfg = _interactive()
+        try:
+            cfg = _interactive()
+        except EOFError:
+            _log("stdin is not a terminal – use --video and other flags. See --help.", level="err")
+            sys.exit(1)
+    elif not is_tty and len(sys.argv) == 1:
+                                                       
+        _print_help(); sys.exit(0)
     else:
         if "video_path" not in parsed:
             _log("--video is required in non-interactive mode. Use --help for usage.", level="err")
             sys.exit(1)
 
+                                                         
         cfg = {
             "video_path":        parsed["video_path"],
             "start_seconds":     CLIWorker._parse_time(parsed.get("start", 0)),
@@ -1074,7 +1140,6 @@ def main():
         if not _quiet_mode:
             traceback.print_exc()
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
