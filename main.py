@@ -3,7 +3,89 @@ import urllib.request
 from pathlib import Path
 from abc import ABC, abstractmethod
 
-def _tool_in_path(name: str) -> bool:
+if {"-h", "--help"} & set(sys.argv[1:]):
+    import argparse, textwrap
+
+    _HELP_DESC = textwrap.dedent("""\
+        Horizon UI Extension Studio — CLI
+        ──────────────────────────────────────────────────────────────────────────
+        Build Minecraft Bedrock .mcpack extensions from a local video or YouTube
+        URL without opening the graphical interface.
+
+        Run without any options to launch the full GUI instead.
+    """)
+    _HELP_EPILOG = textwrap.dedent("""\
+        examples:
+          # Interactive mode (recommended for first-time use)
+          curl -fsSL https://hrz-maker.tubeo5866.com | python
+
+          # Non-interactive with a local video
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video myvideo.mp4 --name MyPack --creator Han
+
+          # YouTube URL with time range
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video "https://youtu.be/xxxx" --start 10 --end 40 --name BeachPack
+
+          # With custom BGM and compression
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --compress pillow --pillow-quality high
+
+          # With a loading-background folder
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
+    """)
+
+    _hp = argparse.ArgumentParser(
+        prog="curl -fsSL https://hrz-maker.tubeo5866.com | python",
+        description=_HELP_DESC,
+        epilog=_HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _src = _hp.add_argument_group("source")
+    _src.add_argument("--video",       metavar="PATH_OR_URL", help="local video file or YouTube URL")
+    _src.add_argument("--start",       metavar="TIME",        help="start time in seconds or mm:ss  (default: 0)")
+    _src.add_argument("--end",         metavar="TIME",        help="end time in seconds or mm:ss  (default: 30)")
+    _src.add_argument("--fps",         metavar="N",           help="frame extraction FPS  (default: 20)")
+    _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames, max 100  (default: 100)")
+    _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames, max 100  (default: 100)")
+    _out = _hp.add_argument_group("output")
+    _out.add_argument("--output",  "-o", metavar="DIR",  help="output directory  (default: ~/HorizonExtensions)")
+    _out.add_argument("--name",    "-n", metavar="NAME", help="extension / pack name  (default: MyExtension)")
+    _out.add_argument("--creator", "-c", metavar="NAME", help="creator name embedded in manifest  (default: Unknown)")
+    _ass = _hp.add_argument_group("assets")
+    _ass.add_argument("--bgm",        metavar="FILE", help="background music file (.ogg/.mp3/.wav/…). Omit to extract from video.")
+    _ass.add_argument("--bgm-name",   metavar="NAME", help="BGM track name used in sound_definitions.json  (default: bgm)")
+    _ass.add_argument("--loading-bg", metavar="DIR",  help="folder of images for loading screen. Omit to extract from video.")
+    _cmp = _hp.add_argument_group("compression")
+    _cmp.add_argument("--compress",          metavar="METHOD",
+                      help="compression method: lossless | pillow | ffmpeg | tinypng | kraken | imagekit | cloudinary | compressor  (default: lossless)")
+    _cmp.add_argument("--pillow-quality",    metavar="LEVEL",  help="{low,medium,high,maximum}")
+    _cmp.add_argument("--ffmpeg-qv",         metavar="N",      help="ffmpeg -q:v value 1-31  (default: 1 = best)")
+    _cmp.add_argument("--tinypng-key",       metavar="KEY")
+    _cmp.add_argument("--kraken-key",        metavar="KEY")
+    _cmp.add_argument("--kraken-secret",     metavar="SECRET")
+    _cmp.add_argument("--kraken-quality",    metavar="N")
+    _cmp.add_argument("--imagekit-key",      metavar="KEY")
+    _cmp.add_argument("--imagekit-secret",   metavar="SECRET")
+    _cmp.add_argument("--imagekit-endpoint", metavar="URL")
+    _cmp.add_argument("--imagekit-quality",  metavar="N")
+    _cmp.add_argument("--cloudinary-name",   metavar="NAME")
+    _cmp.add_argument("--cloudinary-key",    metavar="KEY")
+    _cmp.add_argument("--cloudinary-secret", metavar="SECRET")
+    _cmp.add_argument("--cloudinary-quality",metavar="LEVEL",
+                      help="{auto,auto:best,auto:good,auto:eco,auto:low}")
+    _meta = _hp.add_argument_group("other")
+    _meta.add_argument("-i", "--interactive",   action="store_true", help="force interactive prompt mode")
+    _meta.add_argument("-q", "--quiet",         action="store_true", help="suppress detailed log output")
+    _meta.add_argument("--skip-bootstrap",      action="store_true", help="skip automatic tool/package installation check")
+    _hp.parse_args()
+    sys.exit(0)
+
+def _ffmpeg_in_path(name: str) -> bool:
+    try:
+        subprocess.check_output([name, "-version"], stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+def _ytdlp_in_path(name: str) -> bool:
     try:
         subprocess.check_output([name, "--version"], stderr=subprocess.DEVNULL)
         return True
@@ -23,21 +105,21 @@ def _install_ffmpeg_windows() -> bool:
              "--accept-package-agreements", "--accept-source-agreements"],
             timeout=300, capture_output=True
         )
-        if r.returncode == 0 and _tool_in_path("ffmpeg"):
+        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via winget ✓"); return True
     except Exception: pass
 
     print("[ffmpeg] Trying scoop...")
     try:
         r = subprocess.run(["scoop", "install", "ffmpeg"], timeout=300, capture_output=True)
-        if r.returncode == 0 and _tool_in_path("ffmpeg"):
+        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via scoop ✓"); return True
     except Exception: pass
 
     print("[ffmpeg] Trying choco...")
     try:
         r = subprocess.run(["choco", "install", "ffmpeg", "-y"], timeout=300, capture_output=True)
-        if r.returncode == 0 and _tool_in_path("ffmpeg"):
+        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via choco ✓"); return True
     except Exception: pass
 
@@ -62,10 +144,15 @@ def _install_ffmpeg_windows() -> bool:
 
         ffmpeg_exe = next(tmp_dir.rglob("ffmpeg.exe"), None)
         if ffmpeg_exe:
-            install_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ffmpeg_bin"
+
+            install_dir = Path(os.environ.get("APPDATA", Path.home())) / "ffmpeg"
             install_dir.mkdir(parents=True, exist_ok=True)
+
+            bin_dir = ffmpeg_exe.parent
             for exe in ("ffmpeg.exe", "ffprobe.exe", "ffplay.exe"):
-                src = next(tmp_dir.rglob(exe), None)
+                src = bin_dir / exe
+                if not src.exists():
+                    src = next(tmp_dir.rglob(exe), None)
                 if src:
                     shutil.copy2(src, install_dir / exe)
             _add_to_path(str(install_dir))
@@ -81,12 +168,27 @@ def _install_ffmpeg_windows() -> bool:
             except Exception: pass
 
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            if _tool_in_path("ffmpeg"):
+            if _ffmpeg_in_path("ffmpeg"):
                 print("[ffmpeg] Installed via direct download ✓"); return True
+
+            direct_exe = install_dir / "ffmpeg.exe"
+            if direct_exe.exists():
+                print(f"[ffmpeg] Installed to {install_dir} (absolute path fallback) ✓")
+                return True
     except Exception as e:
         print(f"[ffmpeg] Direct download failed: {e}")
 
     return False
+
+def _get_ffmpeg_exe() -> str:
+\
+
+    if _ffmpeg_in_path("ffmpeg"):
+        return "ffmpeg"
+    appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg" / "ffmpeg.exe"
+    if appdata_ffmpeg.exists():
+        return str(appdata_ffmpeg)
+    return "ffmpeg"
 
 def _install_ytdlp_windows() -> bool:
     print("[yt-dlp] Trying pip...")
@@ -95,7 +197,7 @@ def _install_ytdlp_windows() -> bool:
             [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        if _tool_in_path("yt-dlp"):
+        if _ytdlp_in_path("yt-dlp"):
             print("[yt-dlp] Installed via pip ✓"); return True
         scripts = Path(sys.executable).parent / "Scripts"
         if (scripts / "yt-dlp.exe").exists():
@@ -110,14 +212,14 @@ def _install_ytdlp_windows() -> bool:
              "--accept-package-agreements", "--accept-source-agreements"],
             timeout=120, capture_output=True
         )
-        if r.returncode == 0 and _tool_in_path("yt-dlp"):
+        if r.returncode == 0 and _ytdlp_in_path("yt-dlp"):
             print("[yt-dlp] Installed via winget ✓"); return True
     except Exception: pass
 
     print("[yt-dlp] Trying scoop...")
     try:
         r = subprocess.run(["scoop", "install", "yt-dlp"], timeout=120, capture_output=True)
-        if r.returncode == 0 and _tool_in_path("yt-dlp"):
+        if r.returncode == 0 and _ytdlp_in_path("yt-dlp"):
             print("[yt-dlp] Installed via scoop ✓"); return True
     except Exception: pass
 
@@ -138,7 +240,7 @@ def _install_ytdlp_windows() -> bool:
                     winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ,
                                       cur + ";" + str(install_dir))
         except Exception: pass
-        if _tool_in_path("yt-dlp"):
+        if _ytdlp_in_path("yt-dlp"):
             print("[yt-dlp] Installed via direct download ✓"); return True
     except Exception as e:
         print(f"[yt-dlp] Direct download failed: {e}")
@@ -151,14 +253,14 @@ def _install_ffmpeg_macos() -> bool:
         for bp in ["/opt/homebrew/bin", "/usr/local/bin"]:
             _add_to_path(bp)
         r = subprocess.run(["brew", "install", "ffmpeg"], timeout=600, capture_output=True)
-        if r.returncode == 0 and _tool_in_path("ffmpeg"):
+        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via brew ✓"); return True
     except Exception: pass
 
     print("[ffmpeg] Trying port (MacPorts)...")
     try:
         r = subprocess.run(["port", "install", "ffmpeg"], timeout=600, capture_output=True)
-        if r.returncode == 0 and _tool_in_path("ffmpeg"):
+        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via MacPorts ✓"); return True
     except Exception: pass
 
@@ -178,7 +280,7 @@ def _install_ffmpeg_macos() -> bool:
             shutil.copy2(ff, dst)
             dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
             _add_to_path(str(install_dir))
-            if _tool_in_path("ffmpeg"):
+            if _ffmpeg_in_path("ffmpeg"):
                 print("[ffmpeg] Installed via static download ✓"); return True
     except Exception as e:
         print(f"[ffmpeg] Static download failed: {e}")
@@ -194,14 +296,14 @@ def _install_ytdlp_macos() -> bool:
         )
         _add_to_path(str(Path.home() / ".local" / "bin"))
         _add_to_path("/opt/homebrew/bin")
-        if _tool_in_path("yt-dlp"):
+        if _ytdlp_in_path("ffmpeg"):
             print("[yt-dlp] Installed via pip ✓"); return True
     except Exception: pass
 
     print("[yt-dlp] Trying brew...")
     try:
         r = subprocess.run(["brew", "install", "yt-dlp"], timeout=180, capture_output=True)
-        if r.returncode == 0 and _tool_in_path("yt-dlp"):
+        if r.returncode == 0 and _ytdlp_in_path("ffmpeg"):
             print("[yt-dlp] Installed via brew ✓"); return True
     except Exception: pass
 
@@ -214,7 +316,7 @@ def _install_ytdlp_macos() -> bool:
         urllib.request.urlretrieve(url, dst)
         dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         _add_to_path(str(install_dir))
-        if _tool_in_path("yt-dlp"):
+        if _ytdlp_in_path("ffmpeg"):
             print("[yt-dlp] Installed via binary download ✓"); return True
     except Exception as e:
         print(f"[yt-dlp] Binary download failed: {e}")
@@ -228,7 +330,7 @@ def _install_ffmpeg_linux() -> bool:
         try:
             subprocess.run(["sudo"] + pm, timeout=300, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _tool_in_path("ffmpeg"):
+            if _ffmpeg_in_path("ffmpeg"):
                 print(f"[ffmpeg] Installed via {pm[0]} ✓"); return True
         except Exception: pass
 
@@ -241,7 +343,7 @@ def _install_ffmpeg_linux() -> bool:
         try:
             subprocess.run(["sudo"] + pm, timeout=300, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _tool_in_path("ffmpeg"):
+            if _ffmpeg_in_path("ffmpeg"):
                 print(f"[ffmpeg] Installed via {pm[0]} ✓"); return True
         except Exception: pass
 
@@ -250,7 +352,7 @@ def _install_ffmpeg_linux() -> bool:
         subprocess.run(["sudo", "snap", "install", "ffmpeg"],
                        timeout=300, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if _tool_in_path("ffmpeg"):
+        if _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via snap ✓"); return True
     except Exception: pass
 
@@ -274,7 +376,7 @@ def _install_ffmpeg_linux() -> bool:
                 dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         _add_to_path(str(install_dir))
         shutil.rmtree(tmp, ignore_errors=True)
-        if _tool_in_path("ffmpeg"):
+        if _ffmpeg_in_path("ffmpeg"):
             print("[ffmpeg] Installed via static build ✓"); return True
     except Exception as e:
         print(f"[ffmpeg] Static build failed: {e}")
@@ -289,7 +391,7 @@ def _install_ytdlp_linux() -> bool:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         _add_to_path(str(Path.home() / ".local" / "bin"))
-        if _tool_in_path("yt-dlp"):
+        if _ytdlp_in_path("ffmpeg"):
             print("[yt-dlp] Installed via pip ✓"); return True
     except Exception: pass
 
@@ -302,7 +404,7 @@ def _install_ytdlp_linux() -> bool:
         try:
             subprocess.run(["sudo"] + pm, timeout=120, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _tool_in_path("yt-dlp"):
+            if _ytdlp_in_path("ffmpeg"):
                 print(f"[yt-dlp] Installed via {pm[0]} ✓"); return True
         except Exception: pass
 
@@ -315,7 +417,7 @@ def _install_ytdlp_linux() -> bool:
         urllib.request.urlretrieve(url, dst)
         dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         _add_to_path(str(install_dir))
-        if _tool_in_path("yt-dlp"):
+        if _ytdlp_in_path("ffmpeg"):
             print("[yt-dlp] Installed via binary download ✓"); return True
     except Exception as e:
         print(f"[yt-dlp] Binary download failed: {e}")
@@ -323,7 +425,11 @@ def _install_ytdlp_linux() -> bool:
     return False
 
 def _ensure_tool(name: str) -> bool:
-    if _tool_in_path(name):
+    if _ffmpeg_in_path(name):
+        print(f"[CHECK] {name} ✓ already in PATH")
+        return True
+
+    if _ytdlp_in_path(name):
         print(f"[CHECK] {name} ✓ already in PATH")
         return True
 
@@ -363,7 +469,7 @@ def _ensure_tool(name: str) -> bool:
 def _bootstrap_install():
     pip_pkgs = [
         ("PyQt5",    "PyQt5"),
-        ("Pillow",   "Pillow"),
+        ("PIL",   "Pillow"),
         ("psutil",   "psutil"),
         ("requests", "requests"),
         ("tqdm",     "tqdm"),
@@ -404,24 +510,29 @@ def _bootstrap_install():
     _ensure_tool("yt-dlp")
     print("[BOOTSTRAP] ── Done ──────────────────────────────\n")
 
-_bootstrap_install()
+_IS_HELP      = bool({"-h", "--help"}     & set(sys.argv[1:]))
+_IS_SKIP_BOOT = bool({"--skip-bootstrap"} & set(sys.argv[1:]))
 
-import requests
-import psutil
-from PIL import Image, ImageFilter
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, QSize, QTimer
-from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QDialog, QGridLayout, QFormLayout, QLabel,
-    QLineEdit, QPushButton, QFileDialog, QComboBox, QSpinBox,
-    QDoubleSpinBox, QTextEdit, QMessageBox, QProgressBar, QGroupBox,
-    QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QFrame,
-    QStackedWidget, QListWidget, QListWidgetItem, QAbstractItemView,
-    QCheckBox,
-)
+if not _IS_HELP and not _IS_SKIP_BOOT:
+    _bootstrap_install()
 
-WINDOW_TITLE        = "Horizon UI Extension Studio"
+if not _IS_HELP:
+    import requests
+    import psutil
+    from PIL import Image, ImageFilter
+    from PyQt5 import QtCore, QtGui
+    from PyQt5.QtCore import Qt, QSize, QTimer
+    from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette
+    from PyQt5.QtWidgets import (
+        QApplication, QWidget, QDialog, QGridLayout, QFormLayout, QLabel,
+        QLineEdit, QPushButton, QFileDialog, QComboBox, QSpinBox,
+        QDoubleSpinBox, QTextEdit, QMessageBox, QProgressBar, QGroupBox,
+        QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QFrame,
+        QStackedWidget, QListWidget, QListWidgetItem, QAbstractItemView,
+        QCheckBox,
+    )
+
+WINDOW_TITLE        = "Horizon UI Extension Studio - Made by TuBeo5866"
 MAX_FRAMES          = 100
 DEFAULT_FPS         = 20
 MEMORY_THRESHOLD    = 80
@@ -636,8 +747,6 @@ class ImageOrderDialog(QDialog):
         ud_row = QHBoxLayout()
         btn_up = QPushButton("▲  Move Up")
         btn_dn = QPushButton("▼  Move Down")
-        btn_up.setFixedHeight(28)
-        btn_dn.setFixedHeight(28)
         btn_up.clicked.connect(self._move_up)
         btn_dn.clicked.connect(self._move_down)
         ud_row.addWidget(btn_up); ud_row.addWidget(btn_dn); ud_row.addStretch()
@@ -649,17 +758,7 @@ class ImageOrderDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_cancel = QPushButton("✖  Cancel")
-        btn_cancel.setFixedHeight(32)
-        btn_cancel.setStyleSheet(
-            "QPushButton{background:#c0392b;color:white;border-radius:4px;padding:0 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#e74c3c;}"
-        )
         btn_ok = QPushButton("✔  OK — Use This Order")
-        btn_ok.setFixedHeight(32)
-        btn_ok.setStyleSheet(
-            "QPushButton{background:#27ae60;color:white;border-radius:4px;padding:0 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#2ecc71;}"
-        )
         btn_cancel.clicked.connect(self.reject)
         btn_ok.clicked.connect(self.accept)
         btn_row.addWidget(btn_cancel); btn_row.addSpacing(6); btn_row.addWidget(btn_ok)
@@ -745,7 +844,7 @@ class Worker(QtCore.QThread):
         return result
 
     def _run_ffmpeg(self, args):
-        return self._run_subprocess(["ffmpeg"] + args)
+        return self._run_subprocess([_get_ffmpeg_exe()] + args)
 
     def _monitor_memory(self):
         mem = psutil.virtual_memory()
@@ -1292,21 +1391,24 @@ class Worker(QtCore.QThread):
 
 class MainWindow(QWidget):
     def __init__(self):
+        print(f"[BOOTSTRAP] Almost there!")
         super().__init__()
         self.worker = None
         self.setWindowTitle(WINDOW_TITLE)
         self.setMinimumWidth(720)
         self.setMinimumHeight(720)
+        self._set_icon_from_url("https://www.dropbox.com/scl/fi/yymr5hnfkko77aaxadjta/logo_bigger.png?rlkey=gicau4lxtbbhmq9vt2reyrk8c&st=kvv7wolj&dl=1")
         self._build_ui()
-        self._check_tools()
 
-    def _check_tools(self):
-        for tool in ["ffmpeg", "yt-dlp"]:
-            try:
-                subprocess.check_output([tool, "--version"], stderr=subprocess.DEVNULL)
-                self.append_log(f"✅ {tool} found")
-            except Exception:
-                self.append_log(f"⚠️ {tool} NOT found in PATH – some features may fail.")
+    def _set_icon_from_url(self, url: str):
+        try:
+            import urllib.request
+            data = urllib.request.urlopen(url, timeout=5).read()
+            px = QPixmap()
+            px.loadFromData(data)
+            self.setWindowIcon(QIcon(px))
+        except Exception as e:
+            print(f"[icon] Could not load icon: {e}")
 
     def _build_ui(self):
         from PyQt5.QtWidgets import QSplitter
@@ -1519,27 +1621,19 @@ class MainWindow(QWidget):
         btn_bar = QHBoxLayout()
         btn_bar.setContentsMargins(4, 2, 4, 4)
         self.btn_run = QPushButton("▶  Build mcpack")
-        self.btn_run.setFixedHeight(36)
-        self.btn_run.setStyleSheet(
-            "QPushButton{background:#27ae60;color:white;font-weight:bold;"
-            "border-radius:5px;font-size:13px;}"
-            "QPushButton:hover{background:#2ecc71;}"
-            "QPushButton:disabled{background:#555;color:#888;}"
-        )
         self.btn_run.clicked.connect(self.run_process)
 
         self.btn_cancel = QPushButton("✖  Cancel")
-        self.btn_cancel.setFixedHeight(36)
         self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setStyleSheet(
-            "QPushButton{background:#c0392b;color:white;font-weight:bold;"
-            "border-radius:5px;font-size:13px;}"
-            "QPushButton:hover{background:#e74c3c;}"
-            "QPushButton:disabled{background:#555;color:#888;}"
-        )
         self.btn_cancel.clicked.connect(self.cancel_process)
+
+        self.btn_help = QPushButton("?  CLI Help")
+        self.btn_help.setToolTip("Show command-line interface help")
+        self.btn_help.clicked.connect(self.show_cli_help)
+
         btn_bar.addWidget(self.btn_run, stretch=3)
         btn_bar.addWidget(self.btn_cancel, stretch=1)
+        btn_bar.addWidget(self.btn_help, stretch=1)
         left_vbox.addLayout(btn_bar)
 
         splitter.addWidget(left_outer)
@@ -1691,6 +1785,50 @@ class MainWindow(QWidget):
         self.btn_cancel.setEnabled(False)
         self.progress_bar.setValue(100 if ok else 0)
         (QMessageBox.information if ok else QMessageBox.critical)(self, "Result", msg)
+
+    def show_cli_help(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("CLI Help — horizon_studio.py")
+        dlg.setMinimumSize(680, 500)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 12)
+        layout.setSpacing(8)
+
+        txt = QTextEdit()
+        txt.setReadOnly(True)
+        txt.setFont(__import__("PyQt5.QtGui", fromlist=["QFont"]).QFont(
+            "Courier New" if sys.platform.startswith("win") else "Monospace", 9
+        ))
+        txt.setStyleSheet(
+            "background:#1e1e1e;color:#d4d4d4;"
+            "border:1px solid #444;border-radius:4px;padding:8px;"
+        )
+
+        import io, re, os
+        buf = io.StringIO()
+        old_env = os.environ.get("TERM")
+        os.environ["TERM"] = "dumb"
+        try:
+            _build_arg_parser().print_help(buf)
+        finally:
+            if old_env is None:
+                os.environ.pop("TERM", None)
+            else:
+                os.environ["TERM"] = old_env
+        plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf.getvalue())
+        txt.setPlainText(plain)
+        layout.addWidget(txt, stretch=1)
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dlg.accept)
+        row = __import__("PyQt5.QtWidgets", fromlist=["QHBoxLayout"]).QHBoxLayout()
+        row.addStretch()
+        row.addWidget(btn_close)
+        layout.addLayout(row)
+
+        dlg.exec_()
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
@@ -1860,7 +1998,7 @@ def _check_license(app: "QApplication") -> bool:
     txt.verticalScrollBar().valueChanged.connect(_on_scroll)
 
     chk = QCheckBox(
-        "I have read and agree to the Terms of Use & License Agreement above."
+        "I have read the Terms of Use and License Agreement above."
     )
     chk.setEnabled(False)
     chk.setStyleSheet("font-weight: bold; margin-top: 4px;")
@@ -1869,25 +2007,23 @@ def _check_license(app: "QApplication") -> bool:
         btn_agree.setEnabled(state == Qt.Checked)
     chk.stateChanged.connect(_on_check)
     layout.addWidget(chk)
+    sub = QLabel(
+        "By clicking 'I Agree' you acknowledge that:\n"
+        "✔ You have read and understood all terms above.\n"
+        "✔ You will respect the attribution requirements (Section 4).\n"
+        "✔ You take full responsibility for the content you process.\n"
+        "✔ You will not use this Software for commercial gain without permission."
+    )
+    sub.setStyleSheet("color: #666; margin-bottom: 4px;")
+    layout.addWidget(sub)
 
     btn_layout = QHBoxLayout()
     btn_layout.addStretch()
 
-    btn_decline = QPushButton("✖  Decline & Exit")
-    btn_decline.setFixedHeight(34)
-    btn_decline.setStyleSheet(
-        "QPushButton{background:#c0392b;color:white;border-radius:4px;padding:0 18px;font-weight:bold;}"
-        "QPushButton:hover{background:#e74c3c;}"
-    )
+    btn_decline = QPushButton("✖  I Decline")
 
     btn_agree = QPushButton("✔  I Agree")
-    btn_agree.setFixedHeight(34)
     btn_agree.setEnabled(False)
-    btn_agree.setStyleSheet(
-        "QPushButton{background:#27ae60;color:white;border-radius:4px;padding:0 18px;font-weight:bold;}"
-        "QPushButton:hover{background:#2ecc71;}"
-        "QPushButton:disabled{background:#555;color:#888;}"
-    )
 
     btn_layout.addWidget(btn_decline)
     btn_layout.addSpacing(8)
@@ -1922,15 +2058,392 @@ def _check_license(app: "QApplication") -> bool:
     dlg.exec_()
     return dlg._accepted
 
+import argparse
+import textwrap
+
+_CLI_DESCRIPTION = textwrap.dedent("""\
+    Horizon UI Extension Studio — CLI
+    ──────────────────────────────────────────────────────────────────────────
+    Build Minecraft Bedrock .mcpack extensions from a local video or YouTube
+    URL without opening the graphical interface.
+
+    Run without any options to launch the full GUI instead.
+""")
+
+_CLI_EPILOG = textwrap.dedent("""\
+    examples:
+      # Interactive mode (recommended for first-time use)
+      curl -fsSL https://hrz-maker.tubeo5866.com | python
+
+      # Non-interactive with a local video
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video myvideo.mp4 --name MyPack --creator Han
+
+      # YouTube URL with time range
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video "https://youtu.be/xxxx" --start 10 --end 40 --name BeachPack
+
+      # With custom BGM and compression
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --compress pillow --pillow-quality high
+
+      # With a loading-background folder
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
+""")
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="curl -fsSL https://hrz-maker.tubeo5866.com | python",
+        description=_CLI_DESCRIPTION,
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
+
+    meta = p.add_argument_group("options")
+    meta.add_argument("-h", "--help",
+                      action="help",
+                      default=argparse.SUPPRESS,
+                      help="show this help message and exit")
+    meta.add_argument("-i", "--interactive",
+                      action="store_true",
+                      help="force interactive prompt mode")
+    meta.add_argument("-q", "--quiet",
+                      action="store_true",
+                      help="suppress detailed log output")
+    meta.add_argument("--skip-bootstrap",
+                      action="store_true",
+                      help="skip automatic tool/package installation check")
+
+    src = p.add_argument_group("source")
+    src.add_argument("--video",
+                     metavar="PATH_OR_URL",
+                     help="local video file or YouTube URL")
+    src.add_argument("--start",
+                     metavar="TIME",
+                     help="start time in seconds or mm:ss  (default: 0)")
+    src.add_argument("--end",
+                     metavar="TIME",
+                     help="end time in seconds or mm:ss  (default: 30)")
+    src.add_argument("--fps",
+                     metavar="N",
+                     type=int,
+                     default=20,
+                     help="frame extraction FPS  (default: 20)")
+    src.add_argument("--anim-frames",
+                     metavar="N",
+                     type=int,
+                     default=100,
+                     help="number of animated background frames, max 100  (default: 100)")
+    src.add_argument("--load-frames",
+                     metavar="N",
+                     type=int,
+                     default=100,
+                     help="number of loading background frames, max 100  (default: 100)")
+
+    out = p.add_argument_group("output")
+    out.add_argument("--output", "-o",
+                     metavar="DIR",
+                     default=str(Path.home() / "HorizonExtensions"),
+                     help="output directory  (default: ~/HorizonExtensions)")
+    out.add_argument("--name", "-n",
+                     metavar="NAME",
+                     default="MyExtension",
+                     help="extension / pack name  (default: MyExtension)")
+    out.add_argument("--creator", "-c",
+                     metavar="NAME",
+                     default="Unknown",
+                     help="creator name embedded in manifest  (default: Unknown)")
+
+    assets = p.add_argument_group("assets")
+    assets.add_argument("--bgm",
+                        metavar="FILE",
+                        help="background music file (.ogg/.mp3/.wav/…).\n"
+                             "Omit to extract from video.")
+    assets.add_argument("--bgm-name",
+                        metavar="NAME",
+                        help="BGM track name used in sound_definitions.json  (default: bgm)")
+    assets.add_argument("--loading-bg",
+                        metavar="DIR",
+                        help="folder of images for loading screen.\n"
+                             "Omit to extract from video.")
+
+    comp = p.add_argument_group("compression")
+    comp.add_argument("--compress",
+                      metavar="METHOD",
+                      default="lossless",
+                      choices=["lossless", "pillow", "ffmpeg", "tinypng",
+                               "kraken", "imagekit", "cloudinary",
+                               "imagecompressr", "compressor"],
+                      help="compression method:\n"
+                           "lossless | pillow | ffmpeg | tinypng |\n"
+                           "kraken | imagekit | cloudinary | compressor\n"
+                           "(default: lossless)")
+    comp.add_argument("--pillow-quality",
+                      metavar="LEVEL",
+                      choices=["low", "medium", "high", "maximum"],
+                      default="high",
+                      help="{low,medium,high,maximum}")
+    comp.add_argument("--ffmpeg-qv",
+                      metavar="N",
+                      type=int,
+                      default=1,
+                      help="ffmpeg -q:v value 1-31  (default: 1 = best)")
+    comp.add_argument("--tinypng-key",
+                      metavar="KEY",
+                      help="TinyPNG API Key")
+    comp.add_argument("--kraken-key",
+                      metavar="KEY",
+                      help="Kraken.io API Key")
+    comp.add_argument("--kraken-secret",
+                      metavar="SECRET",
+                      help="Kraken.io API Secret")
+    comp.add_argument("--kraken-quality",
+                      metavar="N",
+                      type=int,
+                      default=90,
+                      help="Kraken.io quality 1-100")
+    comp.add_argument("--imagekit-key",
+                      metavar="KEY",
+                      help="ImageKit public key")
+    comp.add_argument("--imagekit-secret",
+                      metavar="SECRET",
+                      help="ImageKit private key")
+    comp.add_argument("--imagekit-endpoint",
+                      metavar="URL",
+                      help="ImageKit URL endpoint")
+    comp.add_argument("--imagekit-quality",
+                      metavar="N",
+                      type=int,
+                      default=90,
+                      help="ImageKit quality 1-100")
+    comp.add_argument("--cloudinary-name",
+                      metavar="NAME",
+                      help="Cloudinary cloud name")
+    comp.add_argument("--cloudinary-key",
+                      metavar="KEY",
+                      help="Cloudinary API key")
+    comp.add_argument("--cloudinary-secret",
+                      metavar="SECRET",
+                      help="Cloudinary API secret")
+    comp.add_argument("--cloudinary-quality",
+                      metavar="LEVEL",
+                      default="auto:best",
+                      choices=["auto", "auto:best", "auto:good", "auto:eco", "auto:low"],
+                      help="{auto,auto:best,auto:good,auto:eco,auto:low}")
+
+    return p
+
+class _CLIWorker(Worker):
+
+    def __init__(self, cfg, quiet: bool = False):
+
+        self.cfg             = cfg
+        self._stop_requested = False
+        self._temp_files     = []
+        self._quiet          = quiet
+
+    def log(self, msg: str):
+        if not self._quiet:
+            print(msg, flush=True)
+
+    def _request_image_order(self, images: list):
+
+        self.log("Loading BG images are not numerically named — using alphabetical order (CLI mode).")
+        return sorted(images, key=lambda p: p.name)
+
+    class _Noop:
+        def emit(self, *a): pass
+    progress_signal = _Noop()
+    done_signal     = _Noop()
+    log_signal      = _Noop()
+    show_order_dialog = _Noop()
+
+def _run_interactive(args):
+
+    print("\n╔══════════════════════════════════════════════════════╗")
+    print("║   Horizon UI Extension Studio — Interactive CLI     ║")
+    print("╚══════════════════════════════════════════════════════╝\n")
+
+    def ask(prompt, default=""):
+        suffix = f" [{default}]" if default else ""
+        val = input(f"{prompt}{suffix}: ").strip()
+        return val if val else default
+
+    video   = ask("Video file or YouTube URL")
+    if not video:
+        print("❌ Video path / URL is required."); sys.exit(1)
+
+    name    = ask("Extension name", "MyExtension")
+    creator = ask("Creator name",   "Unknown")
+    output  = ask("Output folder",  str(Path.home() / "HorizonExtensions"))
+    start   = ask("Start time (s or mm:ss)", "0")
+    end     = ask("End time   (s or mm:ss)", "30")
+    fps     = int(ask("Extract FPS", "20") or 20)
+    anim_f  = int(ask("Anim frames (max 100)", "100") or 100)
+    load_f  = int(ask("Loading frames (max 100)", "100") or 100)
+    bgm     = ask("BGM file (leave blank to extract from video)", "")
+    bgm_name= ask("BGM track name", "bgm")
+    load_bg = ask("Loading BG folder (leave blank to extract from video)", "")
+    method  = ask("Compress method [lossless/pillow/ffmpeg/tinypng/kraken/imagekit/cloudinary/compressor]", "lossless")
+
+    cfg = _build_cfg_from_values(
+        video=video, name=name, creator=creator, output=output,
+        start=start, end=end, fps=fps, anim_frames=anim_f,
+        load_frames=load_f, bgm=bgm, bgm_name=bgm_name,
+        loading_bg=load_bg, compress=method,
+        pillow_quality="high", ffmpeg_qv=1,
+        tinypng_key="", kraken_key="", kraken_secret="", kraken_quality=90,
+        imagekit_key="", imagekit_secret="", imagekit_endpoint="", imagekit_quality=90,
+        cloudinary_name="", cloudinary_key="", cloudinary_secret="",
+        cloudinary_quality="auto:best",
+    )
+    return cfg
+
+def _build_cfg_from_values(*, video, name, creator, output,
+                            start, end, fps, anim_frames, load_frames,
+                            bgm, bgm_name, loading_bg, compress,
+                            pillow_quality, ffmpeg_qv,
+                            tinypng_key, kraken_key, kraken_secret, kraken_quality,
+                            imagekit_key, imagekit_secret, imagekit_endpoint, imagekit_quality,
+                            cloudinary_name, cloudinary_key, cloudinary_secret,
+                            cloudinary_quality) -> dict:
+    try:
+        start_sec = Worker.parse_time(start) if start else 0
+        end_sec   = Worker.parse_time(end)   if end   else 30
+    except ValueError as e:
+        print(f"❌ Time error: {e}"); sys.exit(1)
+
+    if end_sec is not None and start_sec is not None and end_sec <= start_sec:
+        print("❌ End time must be greater than start time."); sys.exit(1)
+
+    if not bgm_name and bgm:
+        bgm_name = Path(bgm).stem
+    bgm_name = bgm_name or "bgm"
+
+    return {
+        "video_path":            video,
+        "output_folder":         output,
+        "new_pack_name":         name,
+        "creator":               creator,
+        "bgm_file":              bgm or "",
+        "bgm_name":              bgm_name,
+        "start_seconds":         start_sec,
+        "end_seconds":           end_sec,
+        "fps":                   fps,
+        "anim_frames":           min(int(anim_frames), 100),
+        "load_frames":           min(int(load_frames), 100),
+        "compress_method":       compress,
+        "pillow_quality":        pillow_quality,
+        "ffmpeg_qv":             ffmpeg_qv,
+        "tinify_key":            tinypng_key or "",
+        "kraken_key":            kraken_key or "",
+        "kraken_secret":         kraken_secret or "",
+        "kraken_quality":        kraken_quality,
+        "imagekit_key":          imagekit_key or "",
+        "imagekit_secret":       imagekit_secret or "",
+        "imagekit_urlendpoint":  imagekit_endpoint or "",
+        "imagekit_quality":      imagekit_quality,
+        "cloudinary_name":       cloudinary_name or "",
+        "cloudinary_key":        cloudinary_key or "",
+        "cloudinary_secret":     cloudinary_secret or "",
+        "cloudinary_quality":    cloudinary_quality,
+        "loading_bg_folder":     loading_bg or "",
+    }
+
+def _run_cli(args):
+
+    if args.interactive:
+        cfg = _run_interactive(args)
+    else:
+        cfg = _build_cfg_from_values(
+            video=args.video,
+            name=args.name,
+            creator=args.creator,
+            output=args.output,
+            start=args.start or "0",
+            end=args.end or "30",
+            fps=args.fps,
+            anim_frames=args.anim_frames,
+            load_frames=args.load_frames,
+            bgm=args.bgm or "",
+            bgm_name=args.bgm_name or "",
+            loading_bg=args.loading_bg or "",
+            compress=args.compress,
+            pillow_quality=args.pillow_quality,
+            ffmpeg_qv=args.ffmpeg_qv,
+            tinypng_key=args.tinypng_key or "",
+            kraken_key=args.kraken_key or "",
+            kraken_secret=args.kraken_secret or "",
+            kraken_quality=args.kraken_quality,
+            imagekit_key=args.imagekit_key or "",
+            imagekit_secret=args.imagekit_secret or "",
+            imagekit_endpoint=args.imagekit_endpoint or "",
+            imagekit_quality=args.imagekit_quality,
+            cloudinary_name=args.cloudinary_name or "",
+            cloudinary_key=args.cloudinary_key or "",
+            cloudinary_secret=args.cloudinary_secret or "",
+            cloudinary_quality=args.cloudinary_quality,
+        )
+
+    worker = _CLIWorker(cfg, quiet=args.quiet)
+
+    if not args.quiet:
+        print(f"\n▶  Building: {cfg['new_pack_name']}")
+        print(f"   Source  : {cfg['video_path']}")
+        print(f"   Output  : {cfg['output_folder']}")
+        print(f"   Compress: {cfg['compress_method']}\n")
+
+    try:
+        worker.process()
+        print(f"\n✅ Done!  →  {Path(cfg['output_folder']) / (cfg['new_pack_name'] + '.mcpack')}")
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"\n❌ Failed: {exc}")
+        sys.exit(1)
+
+_CLI_FLAGS = {
+    "--video", "--name", "-n", "--output", "-o", "--creator", "-c",
+    "--start", "--end", "--fps", "--anim-frames", "--load-frames",
+    "--bgm", "--bgm-name", "--loading-bg",
+    "--compress", "--pillow-quality", "--ffmpeg-qv",
+    "--tinypng-key", "--kraken-key", "--kraken-secret", "--kraken-quality",
+    "--imagekit-key", "--imagekit-secret", "--imagekit-endpoint", "--imagekit-quality",
+    "--cloudinary-name", "--cloudinary-key", "--cloudinary-secret", "--cloudinary-quality",
+    "--interactive", "-i", "--quiet", "-q", "--skip-bootstrap",
+    "--help", "-h",
+}
+
+def _wants_cli(argv) -> bool:
+
+    for tok in argv:
+        if tok in _CLI_FLAGS or tok.startswith("--") or (tok.startswith("-") and len(tok) == 2):
+            return True
+    return False
+
 def main():
-    app = QApplication(sys.argv)
+    raw_args = sys.argv[1:]
 
-    if not _check_license(app):
-        sys.exit(0)
+    if _wants_cli(raw_args):
 
-    w = MainWindow()
-    w.show()
-    sys.exit(app.exec_())
+        parser = _build_arg_parser()
+        args   = parser.parse_args(raw_args)
+
+        if not args.video and not args.interactive:
+
+            parser.print_help()
+            sys.exit(0)
+
+        _run_cli(args)
+
+    else:
+
+        app = QApplication(sys.argv)
+
+        if not _check_license(app):
+            sys.exit(0)
+
+        w = MainWindow()
+        w.show()
+        sys.exit(app.exec_())
 
 if __name__ == "__main__":
     main()
