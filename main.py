@@ -1928,14 +1928,6 @@ all terms listed below. If you do not agree, click "Decline" to exit.
   licensing. Any disputes shall be resolved in good faith between the parties.
 
 ───────────────────────────────────────────────────────────────────────────────
-
-  By clicking "I Agree" you acknowledge that:
-    ✔ You have read and understood all terms above.
-    ✔ You will respect the attribution requirements (Section 4).
-    ✔ You take full responsibility for the content you process.
-    ✔ You will not use this Software for commercial gain without permission.
-
-───────────────────────────────────────────────────────────────────────────────
 """
 
 _AGREED_FLAG = Path.home() / ".hrzn_studio_agreed"
@@ -1955,7 +1947,7 @@ def _check_license(app: "QApplication") -> bool:
     layout.setSpacing(10)
     layout.setContentsMargins(18, 18, 18, 14)
 
-    header = QLabel("📜  Terms of Use & License Agreement")
+    header = QLabel("Terms of Use & License Agreement")
     header_font = QFont()
     header_font.setPointSize(13)
     header_font.setBold(True)
