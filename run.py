@@ -1,4 +1,5 @@
 import base64, urllib.request, zlib, codecs
+from urllib.request import urlopen
 
 banner = r"""
                                                                     
