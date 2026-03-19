@@ -3,6 +3,8 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 
 if {"-h", "--help"} & set(sys.argv[1:]):
+    # _build_arg_parser() is defined later in the file; we inline a minimal
+    # version here so --help works before any heavy imports happen.
     import argparse, textwrap
 
     _HELP_DESC = textwrap.dedent("""\
@@ -29,6 +31,15 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
           # With a loading-background folder
           curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
+
+          # With a custom pack icon and version
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --pack-icon icon.png --ext-version 202.1.0
+
+          # Static background
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode static
+
+          # Both (dynamic + static subpack)
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode both
     """)
 
     _hp = argparse.ArgumentParser(
@@ -45,9 +56,21 @@ if {"-h", "--help"} & set(sys.argv[1:]):
     _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames, max 100  (default: 100)")
     _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames, max 100  (default: 100)")
     _out = _hp.add_argument_group("output")
-    _out.add_argument("--output",  "-o", metavar="DIR",  help="output directory  (default: ~/HorizonExtensions)")
-    _out.add_argument("--name",    "-n", metavar="NAME", help="extension / pack name  (default: MyExtension)")
-    _out.add_argument("--creator", "-c", metavar="NAME", help="creator name embedded in manifest  (default: Unknown)")
+    _out.add_argument("--output",      "-o", metavar="DIR",   help="output directory  (default: ~/HorizonExtensions)")
+    _out.add_argument("--name",        "-n", metavar="NAME",  help="extension / pack name  (default: MyExtension)")
+    _out.add_argument("--creator",     "-c", metavar="NAME",  help="creator name embedded in manifest  (default: Unknown)")
+    _out.add_argument("--ext-version",       metavar="X.Y.Z", help="extension version X.Y.Z embedded in manifest.json  (default: 201.1.0)")
+    _out.add_argument("--pack-icon",         metavar="FILE",
+                      help="PNG file used as pack_icon.png in the root of the pack.\n"
+                           "• If the filename is already 'pack_icon' → copied as-is.\n"
+                           "• Any other name → resized to 256×256 automatically.\n"
+                           "  In GUI mode a crop & zoom dialog is shown instead.")
+    _out.add_argument("--bg-mode",           metavar="MODE",
+                      default="dynamic",
+                      help="background build mode: dynamic | static | both  (default: dynamic)\n"
+                           "  dynamic — extract N animated frames → hrzn_animated_background\n"
+                           "  static  — extract 1 frame only → hrzn_animated_background\n"
+                           "  both    — dynamic main pack + ./subpacks/static/ with 1 frame")
     _ass = _hp.add_argument_group("assets")
     _ass.add_argument("--bgm",        metavar="FILE", help="background music file (.ogg/.mp3/.wav/…). Omit to extract from video.")
     _ass.add_argument("--bgm-name",   metavar="NAME", help="BGM track name used in sound_definitions.json  (default: bgm)")
@@ -57,19 +80,19 @@ if {"-h", "--help"} & set(sys.argv[1:]):
                       help="compression method: lossless | pillow | ffmpeg | tinypng | kraken | imagekit | cloudinary | compressor  (default: lossless)")
     _cmp.add_argument("--pillow-quality",    metavar="LEVEL",  help="{low,medium,high,maximum}")
     _cmp.add_argument("--ffmpeg-qv",         metavar="N",      help="ffmpeg -q:v value 1-31  (default: 1 = best)")
-    _cmp.add_argument("--tinypng-key",       metavar="KEY")
-    _cmp.add_argument("--kraken-key",        metavar="KEY")
-    _cmp.add_argument("--kraken-secret",     metavar="SECRET")
-    _cmp.add_argument("--kraken-quality",    metavar="N")
-    _cmp.add_argument("--imagekit-key",      metavar="KEY")
-    _cmp.add_argument("--imagekit-secret",   metavar="SECRET")
-    _cmp.add_argument("--imagekit-endpoint", metavar="URL")
-    _cmp.add_argument("--imagekit-quality",  metavar="N")
-    _cmp.add_argument("--cloudinary-name",   metavar="NAME")
-    _cmp.add_argument("--cloudinary-key",    metavar="KEY")
-    _cmp.add_argument("--cloudinary-secret", metavar="SECRET")
+    _cmp.add_argument("--tinypng-key",       metavar="KEY",    help="TinyPNG API key")
+    _cmp.add_argument("--kraken-key",        metavar="KEY",    help="Kraken.io API key")
+    _cmp.add_argument("--kraken-secret",     metavar="SECRET", help="Kraken.io API secret")
+    _cmp.add_argument("--kraken-quality",    metavar="N",      help="Kraken.io quality 1-100  (default: 90)")
+    _cmp.add_argument("--imagekit-key",      metavar="KEY",    help="ImageKit public key")
+    _cmp.add_argument("--imagekit-secret",   metavar="SECRET", help="ImageKit private key")
+    _cmp.add_argument("--imagekit-endpoint", metavar="URL",    help="ImageKit URL endpoint")
+    _cmp.add_argument("--imagekit-quality",  metavar="N",      help="ImageKit quality 1-100  (default: 90)")
+    _cmp.add_argument("--cloudinary-name",   metavar="NAME",   help="Cloudinary cloud name")
+    _cmp.add_argument("--cloudinary-key",    metavar="KEY",    help="Cloudinary API key")
+    _cmp.add_argument("--cloudinary-secret", metavar="SECRET", help="Cloudinary API secret")
     _cmp.add_argument("--cloudinary-quality",metavar="LEVEL",
-                      help="{auto,auto:best,auto:good,auto:eco,auto:low}")
+                      help="{auto,auto:best,auto:good,auto:eco,auto:low}  (default: auto:best)")
     _meta = _hp.add_argument_group("other")
     _meta.add_argument("-i", "--interactive",   action="store_true", help="force interactive prompt mode")
     _meta.add_argument("-q", "--quiet",         action="store_true", help="suppress detailed log output")
@@ -180,8 +203,6 @@ def _install_ffmpeg_windows() -> bool:
     return False
 
 def _get_ffmpeg_exe() -> str:
-\
-
     if _ffmpeg_in_path("ffmpeg"):
         return "ffmpeg"
     appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg" / "ffmpeg.exe"
@@ -506,7 +527,7 @@ def _bootstrap_install():
     print("[BOOTSTRAP] ── System tools ──────────────────────")
     _ensure_tool("ffmpeg")
     _ensure_tool("yt-dlp")
-    print("[BOOTSTRAP] ── Done ──────────────────────────────\n")
+    print("[BOOTSTRAP] ── Done ──────────────────────────────")
 
 _IS_HELP      = bool({"-h", "--help"}     & set(sys.argv[1:]))
 _IS_SKIP_BOOT = bool({"--skip-bootstrap"} & set(sys.argv[1:]))
@@ -519,15 +540,15 @@ if not _IS_HELP:
     import psutil
     from PIL import Image, ImageFilter
     from PyQt5 import QtCore, QtGui
-    from PyQt5.QtCore import Qt, QSize, QTimer
-    from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette
+    from PyQt5.QtCore import Qt, QSize, QTimer, QRectF
+    from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette, QPainter, QPainterPath
     from PyQt5.QtWidgets import (
         QApplication, QWidget, QDialog, QGridLayout, QFormLayout, QLabel,
         QLineEdit, QPushButton, QFileDialog, QComboBox, QSpinBox,
         QDoubleSpinBox, QTextEdit, QMessageBox, QProgressBar, QGroupBox,
         QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QFrame,
         QStackedWidget, QListWidget, QListWidgetItem, QAbstractItemView,
-        QCheckBox,
+        QCheckBox, QSlider, QRubberBand, QRadioButton, QButtonGroup,
     )
 
 WINDOW_TITLE        = "Horizon UI Extension Studio - Made by TuBeo5866 - ⚠⚠ BEDROCK ONLY! ⚠⚠"
@@ -544,6 +565,227 @@ UI_DIR              = "ui"
 CONTAINER_BG_URL    = "https://tubeo5866.github.io/files/hrzn_container_background.zip"
 
 FRAME_PREFIX_ANIM   = "hans_common_"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Pack Icon Crop Dialog
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PackIconCropDialog(QDialog):
+    """
+    Shows a preview of the selected PNG and lets the user drag a square crop
+    region plus zoom with a slider. Output is always a 256×256 PNG.
+    """
+
+    _PREVIEW_SIZE = 480   # square preview canvas size in pixels
+
+    def __init__(self, image_path: str, parent=None):
+        super().__init__(parent)
+        self._src_path = Path(image_path)
+        self._orig_pil = Image.open(str(self._src_path)).convert("RGBA")
+        self._zoom      = 1.0        # 1.0 = fit-to-canvas
+        self._offset_x  = 0         # top-left of the cropped view in source pixels
+        self._offset_y  = 0
+        self._drag_start = None
+        self._drag_offset_start = None
+        self._result_pil = None      # set on accept
+
+        self.setWindowTitle("Crop & Zoom Pack Icon")
+        self.setFixedSize(self._PREVIEW_SIZE + 40, self._PREVIEW_SIZE + 160)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self._build()
+        self._reset_view()
+
+    # ── UI ──────────────────────────────────────────────────────────────────
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        hdr = QLabel("🖼  Drag to pan · Scroll or use slider to zoom · Output: 256×256")
+        hdr.setStyleSheet("font-weight:bold; font-size:11px;")
+        layout.addWidget(hdr)
+
+        # Canvas label used as drawing surface
+        self._canvas = QLabel()
+        self._canvas.setFixedSize(self._PREVIEW_SIZE, self._PREVIEW_SIZE)
+        self._canvas.setStyleSheet(
+            "border: 2px solid #555; border-radius: 4px; background: #111;"
+        )
+        self._canvas.setAlignment(Qt.AlignCenter)
+        self._canvas.setCursor(Qt.OpenHandCursor)
+        self._canvas.mousePressEvent   = self._on_mouse_press
+        self._canvas.mouseMoveEvent    = self._on_mouse_move
+        self._canvas.mouseReleaseEvent = self._on_mouse_release
+        self._canvas.wheelEvent        = self._on_wheel
+        layout.addWidget(self._canvas, alignment=Qt.AlignHCenter)
+
+        # Zoom slider
+        zoom_row = QHBoxLayout()
+        zoom_row.addWidget(QLabel("Zoom:"))
+        self._slider = QSlider(Qt.Horizontal)
+        self._slider.setRange(10, 500)   # 0.1× … 5.0×
+        self._slider.setValue(100)
+        self._slider.setTickInterval(10)
+        self._slider.valueChanged.connect(self._on_slider_zoom)
+        zoom_row.addWidget(self._slider)
+        self._zoom_lbl = QLabel("1.00×")
+        self._zoom_lbl.setFixedWidth(46)
+        zoom_row.addWidget(self._zoom_lbl)
+        layout.addLayout(zoom_row)
+
+        # Reset button
+        btn_reset = QPushButton("↺  Reset View")
+        btn_reset.clicked.connect(self._reset_view)
+        layout.addWidget(btn_reset)
+
+        # OK / Cancel
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine); sep.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(sep)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton("✖  Cancel")
+        btn_ok = QPushButton("✔  Use This Crop")
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok.clicked.connect(self._accept)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addSpacing(6)
+        btn_row.addWidget(btn_ok)
+        layout.addLayout(btn_row)
+
+    # ── Geometry helpers ────────────────────────────────────────────────────
+
+    def _reset_view(self):
+        """Fit the whole image into the canvas (zoom so the whole image is visible)."""
+        w, h = self._orig_pil.size
+        short = min(w, h)
+        # zoom so short side fills canvas (= square crop showing full short side)
+        self._zoom = self._PREVIEW_SIZE / short
+        # centre
+        self._offset_x = (w - self._PREVIEW_SIZE / self._zoom) / 2
+        self._offset_y = (h - self._PREVIEW_SIZE / self._zoom) / 2
+        self._clamp_offset()
+        self._slider.setValue(int(self._zoom * 100))
+        self._refresh()
+
+    def _clamp_offset(self):
+        w, h = self._orig_pil.size
+        view = self._PREVIEW_SIZE / self._zoom   # source pixels visible
+        # don't let the view go outside the image
+        self._offset_x = max(0.0, min(self._offset_x, w - view))
+        self._offset_y = max(0.0, min(self._offset_y, h - view))
+
+    # ── Rendering ───────────────────────────────────────────────────────────
+
+    def _refresh(self):
+        w, h = self._orig_pil.size
+        view = self._PREVIEW_SIZE / self._zoom   # side length in source pixels
+
+        x0 = int(max(0, self._offset_x))
+        y0 = int(max(0, self._offset_y))
+        x1 = int(min(w, self._offset_x + view))
+        y1 = int(min(h, self._offset_y + view))
+
+        cropped = self._orig_pil.crop((x0, y0, x1, y1))
+        preview = cropped.resize((self._PREVIEW_SIZE, self._PREVIEW_SIZE), Image.LANCZOS)
+
+        # Convert PIL → QPixmap
+        data = preview.tobytes("raw", "RGBA")
+        qimg = QtGui.QImage(data, self._PREVIEW_SIZE, self._PREVIEW_SIZE,
+                            QtGui.QImage.Format_RGBA8888)
+        px = QPixmap.fromImage(qimg)
+
+        # Draw a subtle centre crosshair
+        painter = QPainter(px)
+        painter.setPen(QtGui.QPen(QColor(255, 255, 255, 80), 1))
+        c = self._PREVIEW_SIZE // 2
+        painter.drawLine(c - 20, c, c + 20, c)
+        painter.drawLine(c, c - 20, c, c + 20)
+        painter.end()
+
+        self._canvas.setPixmap(px)
+        self._zoom_lbl.setText(f"{self._zoom:.2f}×")
+
+    # ── Event handlers ──────────────────────────────────────────────────────
+
+    def _on_mouse_press(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self._drag_start = ev.pos()
+            self._drag_offset_start = (self._offset_x, self._offset_y)
+            self._canvas.setCursor(Qt.ClosedHandCursor)
+
+    def _on_mouse_move(self, ev):
+        if self._drag_start is not None:
+            dx = ev.pos().x() - self._drag_start.x()
+            dy = ev.pos().y() - self._drag_start.y()
+            # pixels in source space per canvas pixel
+            src_per_px = 1.0 / self._zoom
+            self._offset_x = self._drag_offset_start[0] - dx * src_per_px
+            self._offset_y = self._drag_offset_start[1] - dy * src_per_px
+            self._clamp_offset()
+            self._refresh()
+
+    def _on_mouse_release(self, ev):
+        self._drag_start = None
+        self._canvas.setCursor(Qt.OpenHandCursor)
+
+    def _on_wheel(self, ev):
+        delta = ev.angleDelta().y()
+        factor = 1.1 if delta > 0 else 0.9
+        # zoom around the mouse position
+        mx = ev.pos().x()
+        my = ev.pos().y()
+        src_per_px = 1.0 / self._zoom
+        # source coords under mouse before zoom
+        sx = self._offset_x + mx * src_per_px
+        sy = self._offset_y + my * src_per_px
+        self._zoom = max(0.1, min(5.0, self._zoom * factor))
+        # recompute offset so the point under mouse stays fixed
+        src_per_px_new = 1.0 / self._zoom
+        self._offset_x = sx - mx * src_per_px_new
+        self._offset_y = sy - my * src_per_px_new
+        self._clamp_offset()
+        self._slider.blockSignals(True)
+        self._slider.setValue(int(self._zoom * 100))
+        self._slider.blockSignals(False)
+        self._refresh()
+
+    def _on_slider_zoom(self, val):
+        new_zoom = val / 100.0
+        # keep centre fixed
+        w, h = self._orig_pil.size
+        old_view = self._PREVIEW_SIZE / self._zoom
+        new_view = self._PREVIEW_SIZE / new_zoom
+        cx = self._offset_x + old_view / 2
+        cy = self._offset_y + old_view / 2
+        self._zoom = new_zoom
+        self._offset_x = cx - new_view / 2
+        self._offset_y = cy - new_view / 2
+        self._clamp_offset()
+        self._refresh()
+
+    # ── Accept ──────────────────────────────────────────────────────────────
+
+    def _accept(self):
+        w, h = self._orig_pil.size
+        view = self._PREVIEW_SIZE / self._zoom
+        x0 = int(max(0, self._offset_x))
+        y0 = int(max(0, self._offset_y))
+        x1 = int(min(w, self._offset_x + view))
+        y1 = int(min(h, self._offset_y + view))
+        cropped = self._orig_pil.crop((x0, y0, x1, y1))
+        self._result_pil = cropped.resize((256, 256), Image.LANCZOS)
+        self.accept()
+
+    def get_result(self) -> Image.Image:
+        """Returns the cropped 256×256 PIL Image, or None if cancelled."""
+        return self._result_pil
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Compressors
+# ─────────────────────────────────────────────────────────────────────────────
 
 class Compressor(ABC):
     def __init__(self, cfg, log_func):
@@ -681,6 +923,321 @@ class CompressorIoCompressor(Compressor):
     def compress(self, frame_dir: Path):
         self.log("CompressorIo: using Pillow as fallback (Selenium optional).")
         PillowCompressor(self.cfg, self.log).compress(frame_dir)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Minecraft Text Formatter Dialog
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ObfuscatedPreview(QWidget):
+    """
+    Custom widget that renders a parsed sequence of (text, colour, styles, obfuscated)
+    spans and animates the obfuscated ones by shuffling random characters every tick.
+    """
+    _OBFUSC_CHARS = "AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789!@#$%^&*()"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._spans = []           # list of dicts: text, colour, bold, italic, strike, under, obfusc
+        self._rnd_cache = {}       # span_index -> current random string
+        self.setMinimumHeight(34)
+        self.setAutoFillBackground(False)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(80)
+        self._timer.timeout.connect(self._shuffle_obfusc)
+
+    def set_spans(self, spans: list):
+        self._spans = spans
+        self._rnd_cache = {}
+        for i, s in enumerate(spans):
+            if s["obfusc"]:
+                self._rnd_cache[i] = self._random_str(len(s["text"]))
+        has_obfusc = any(s["obfusc"] for s in spans)
+        if has_obfusc:
+            self._timer.start()
+        else:
+            self._timer.stop()
+        self.update()
+
+    def _random_str(self, length: int) -> str:
+        import random
+        return "".join(random.choice(self._OBFUSC_CHARS) for _ in range(max(length, 1)))
+
+    def _shuffle_obfusc(self):
+        for i, s in enumerate(self._spans):
+            if s["obfusc"]:
+                self._rnd_cache[i] = self._random_str(len(s["text"]))
+        self.update()
+
+    def closeEvent(self, ev):
+        self._timer.stop()
+        super().closeEvent(ev)
+
+    def paintEvent(self, event):
+        if not self._spans:
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), QColor("#1a1a1a"))
+            painter.setPen(QColor("#555555"))
+            f = painter.font(); f.setPointSize(10); painter.setFont(f)
+            painter.drawText(self.rect(), Qt.AlignVCenter | Qt.AlignLeft,
+                             "  — empty —")
+            painter.end()
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.fillRect(self.rect(), QColor("#1a1a1a"))
+
+        base_font = QFont("Consolas, Courier New, Monospace")
+        base_font.setPointSize(11)
+
+        x = 8
+        y = self.height() // 2
+
+        for i, span in enumerate(self._spans):
+            text = self._rnd_cache.get(i, span["text"]) if span["obfusc"] else span["text"]
+            if not text:
+                continue
+
+            f = QFont(base_font)
+            f.setBold(span["bold"])
+            f.setItalic(span["italic"])
+            if span["strike"] or span["under"]:
+                f.setStrikeOut(span["strike"])
+                f.setUnderline(span["under"])
+            painter.setFont(f)
+            painter.setPen(QColor(span["colour"]))
+
+            fm = painter.fontMetrics()
+            painter.drawText(x, y + fm.ascent() - fm.height() // 2, text)
+            x += fm.horizontalAdvance(text)
+
+        painter.end()
+
+
+class McFormatDialog(QDialog):
+    """
+    Small helper that lets the user insert Minecraft § colour / style codes
+    into any QLineEdit by picking buttons. Includes a live preview that
+    renders § codes with real colours, styles, and animated obfuscation (§k).
+    """
+
+    # (code, label, hex-colour for button background, text-colour)
+    _COLOURS = [
+        ("0", "0", "#000000", "#ffffff"),
+        ("1", "1", "#0000AA", "#ffffff"),
+        ("2", "2", "#00AA00", "#ffffff"),
+        ("3", "3", "#00AAAA", "#ffffff"),
+        ("4", "4", "#AA0000", "#ffffff"),
+        ("5", "5", "#AA00AA", "#ffffff"),
+        ("6", "6", "#FFAA00", "#000000"),
+        ("7", "7", "#AAAAAA", "#000000"),
+        ("8", "8", "#555555", "#ffffff"),
+        ("9", "9", "#5555FF", "#ffffff"),
+        ("a", "a", "#55FF55", "#000000"),
+        ("b", "b", "#55FFFF", "#000000"),
+        ("c", "c", "#FF5555", "#000000"),
+        ("d", "d", "#FF55FF", "#000000"),
+        ("e", "e", "#FFFF55", "#000000"),
+        ("f", "f", "#FFFFFF", "#000000"),
+    ]
+    _COLOUR_MAP = {code: bg for code, _, bg, _ in _COLOURS}
+
+    # (code, label, tooltip)
+    _STYLES = [
+        ("l", "B",  "Bold"),
+        ("o", "I",  "Italic"),
+        ("m", "S",  "Strikethrough"),
+        ("n", "U",  "Underline"),
+        ("k", "✦", "Obfuscated (random)"),
+        ("r", "R",  "Reset"),
+    ]
+
+    def __init__(self, target: "QLineEdit", parent=None):
+        super().__init__(parent)
+        self._target = target
+        self.setWindowTitle("Format Text…")
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setMinimumWidth(420)
+        self._build()
+
+    # ── UI ──────────────────────────────────────────────────────────────────
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(12, 10, 12, 10)
+
+        # ── Edit field ───────────────────────────────────────────────────
+        hdr = QLabel("Text:")
+        hdr.setStyleSheet("font-weight:bold; font-size:11px;")
+        layout.addWidget(hdr)
+
+        self._edit = QLineEdit(self._target.text())
+        self._edit.setPlaceholderText("Type or use buttons below to insert § codes…")
+        self._edit.setMinimumHeight(28)
+        self._edit.textChanged.connect(self._update_preview)
+        layout.addWidget(self._edit)
+
+        # ── Preview widget ───────────────────────────────────────────────
+        prev_hdr = QLabel("Preview:")
+        prev_hdr.setStyleSheet("font-weight:bold; font-size:10px; margin-top:2px;")
+        layout.addWidget(prev_hdr)
+
+        self._preview = _ObfuscatedPreview()
+        self._preview.setStyleSheet(
+            "border:1px solid #555; border-radius:3px; background:#1a1a1a;"
+        )
+        layout.addWidget(self._preview)
+
+        # ── Colour buttons (8-per-row) ────────────────────────────────────
+        col_hdr = QLabel("Colours:")
+        col_hdr.setStyleSheet("font-weight:bold; font-size:10px; margin-top:4px;")
+        layout.addWidget(col_hdr)
+
+        colour_grid = QWidget()
+        cg = QGridLayout(colour_grid)
+        cg.setSpacing(3)
+        cg.setContentsMargins(0, 0, 0, 0)
+
+        for idx, (code, label, bg, fg) in enumerate(self._COLOURS):
+            btn = QPushButton(label)
+            btn.setFixedSize(36, 28)
+            btn.setToolTip(f"§{code}  ({bg})")
+            btn.setStyleSheet(
+                f"QPushButton {{ background:{bg}; color:{fg}; "
+                f"border:1px solid #555; border-radius:3px; "
+                f"font-weight:bold; font-size:12px; }}"
+                f"QPushButton:hover {{ border:2px solid #fff; }}"
+            )
+            btn.clicked.connect(lambda _, c=code: self._insert(c))
+            cg.addWidget(btn, idx // 8, idx % 8)
+
+        layout.addWidget(colour_grid)
+
+        # ── Style buttons ─────────────────────────────────────────────────
+        style_hdr = QLabel("Styles:")
+        style_hdr.setStyleSheet("font-weight:bold; font-size:10px; margin-top:4px;")
+        layout.addWidget(style_hdr)
+
+        style_row = QHBoxLayout()
+        style_row.setSpacing(4)
+        style_row.setContentsMargins(0, 0, 0, 0)
+
+        _style_css = {
+            "B": "font-weight:bold;",
+            "I": "font-style:italic;",
+            "S": "text-decoration:line-through;",
+            "U": "text-decoration:underline;",
+            "✦": "font-size:11px;",
+            "R": "color:#e07b00; font-weight:bold;",
+        }
+
+        for code, label, tip in self._STYLES:
+            btn = QPushButton(label)
+            btn.setFixedSize(38, 28)
+            btn.setToolTip(f"§{code}  —  {tip}")
+            extra = _style_css.get(label, "")
+            btn.setStyleSheet(
+                f"QPushButton {{ border:1px solid #666; border-radius:3px; "
+                f"background:#2a2a2a; color:#ddd; {extra} }}"
+                f"QPushButton:hover {{ background:#3a3a3a; border-color:#aaa; }}"
+            )
+            btn.clicked.connect(lambda _, c=code: self._insert(c))
+            style_row.addWidget(btn)
+
+        style_row.addStretch()
+        layout.addLayout(style_row)
+
+        # ── Separator ─────────────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(sep)
+
+        # ── OK / Cancel ───────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton("✖  Cancel")
+        btn_ok = QPushButton("✔  OK")
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok.clicked.connect(self._ok)
+        btn_ok.setDefault(True)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addSpacing(6)
+        btn_row.addWidget(btn_ok)
+        layout.addLayout(btn_row)
+
+        # Trigger initial preview render
+        self._update_preview(self._edit.text())
+
+    # ── Helpers ─────────────────────────────────────────────────────────────
+
+    def _insert(self, code: str):
+        """Insert §<code> at the current cursor position."""
+        cursor_pos = self._edit.cursorPosition()
+        text = self._edit.text()
+        new_text = text[:cursor_pos] + f"§{code}" + text[cursor_pos:]
+        self._edit.setText(new_text)
+        self._edit.setCursorPosition(cursor_pos + 2)
+        self._edit.setFocus()
+
+    def _update_preview(self, text: str):
+        """Parse § codes and hand spans to the preview widget."""
+        self._preview.set_spans(self._parse_spans(text))
+
+    @classmethod
+    def _parse_spans(cls, text: str) -> list:
+        """
+        Parse a § formatted string into a list of span dicts:
+          {text, colour, bold, italic, strike, under, obfusc}
+        Follows Minecraft behaviour: colour codes reset all style flags.
+        """
+        import re
+        parts = re.split(r"(§.)", text)
+
+        cur_colour = "#ffffff"
+        bold = italic = strike = under = obfusc = False
+
+        spans = []
+        for part in parts:
+            if len(part) == 2 and part[0] == "§":
+                code = part[1].lower()
+                if code in cls._COLOUR_MAP:
+                    cur_colour = cls._COLOUR_MAP[code]
+                    bold = italic = strike = under = obfusc = False
+                elif code == "l": bold   = True
+                elif code == "o": italic = True
+                elif code == "m": strike = True
+                elif code == "n": under  = True
+                elif code == "k": obfusc = True
+                elif code == "r":
+                    cur_colour = "#ffffff"
+                    bold = italic = strike = under = obfusc = False
+            else:
+                if part:
+                    spans.append({
+                        "text":   part,
+                        "colour": cur_colour,
+                        "bold":   bold,
+                        "italic": italic,
+                        "strike": strike,
+                        "under":  under,
+                        "obfusc": obfusc,
+                    })
+        return spans
+
+    def _ok(self):
+        self._target.setText(self._edit.text())
+        self._preview._timer.stop()
+        self.accept()
+
+    def reject(self):
+        self._preview._timer.stop()
+        super().reject()
+
 
 class ImageOrderDialog(QDialog):
 
@@ -998,11 +1555,42 @@ class Worker(QtCore.QThread):
 
         if src.suffix.lower() == ".ogg":
             shutil.copy2(src, dst)
-            self.log(f"BGM copied: {src.name} \u2192 {dst.name}")
+            self.log(f"BGM copied: {src.name} → {dst.name}")
         else:
-            self.log(f"Converting {src.name} \u2192 {dst.name} (Vorbis OGG)...")
+            self.log(f"Converting {src.name} → {dst.name} (Vorbis OGG)...")
             self._run_ffmpeg(["-y", "-i", str(src), "-acodec", "libvorbis", "-q:a", "6", str(dst)])
-            self.log("BGM conversion done \u2713")
+            self.log("BGM conversion done ✓")
+
+    # ── NEW: copy pack_icon.png ──────────────────────────────────────────────
+
+    def _copy_pack_icon(self, pack_root: Path):
+        """
+        Copy (or save the cropped version of) pack_icon.png into the root of
+        the pack.  cfg["pack_icon_pil"] holds a ready PIL Image (256×256) if
+        the user went through the crop dialog, or cfg["pack_icon_path"] holds
+        a raw path that is already named pack_icon.png.
+        """
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+
+        pil_img = self.cfg.get("pack_icon_pil")          # PIL Image or None
+        raw_path = self.cfg.get("pack_icon_path", "").strip()
+
+        if pil_img is not None:
+            dst = pack_root / "pack_icon.png"
+            pil_img.save(str(dst), "PNG")
+            self.log(f"pack_icon.png saved (cropped 256×256) → {dst}")
+        elif raw_path:
+            src = Path(raw_path)
+            if not src.exists():
+                self.log(f"⚠️ Pack icon not found: {src} — skipping.")
+                return
+            dst = pack_root / "pack_icon.png"
+            shutil.copy2(src, dst)
+            self.log(f"pack_icon.png copied → {dst}")
+        else:
+            self.log("No pack icon specified — skipping.")
+
+    # ────────────────────────────────────────────────────────────────────────
 
     def _gen_bg_anim_json(self, anim_dir: Path, pack_root: Path):
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
@@ -1023,7 +1611,6 @@ class Worker(QtCore.QThread):
             key       = f"{i:02d}"
             y_pct     = "0%" if i == 1 else f"-{(i-1)*100}%"
             next_key  = f"{(i % n) + 1:02d}"
-            trailing  = "" if i < n else ""
             lines.append(f'  "{key}@hrzn_ui_wextension.hans_anim_base":{{"$anm_offset": [ "0px", "{y_pct}" ],"next": "@hrzn_ui_wextension.{next_key}"}},')
 
         lines[-1] = lines[-1].rstrip(",")
@@ -1093,30 +1680,63 @@ class Worker(QtCore.QThread):
         self.log(f".hrzn_public_bg_load.json generated ({n} frames)")
 
     def _gen_manifest(self, pack_root: Path):
-        creator = self.cfg.get("creator", "Unknown")
+        creator  = self.cfg.get("creator", "Unknown")
         ext_name = self.cfg.get("new_pack_name", "MyExtension")
+
+        # ── Extension version (X, Y, Z integers) ──────────────────────────
+        ver_x = int(self.cfg.get("ext_ver_x", 201))
+        ver_y = int(self.cfg.get("ext_ver_y", 1))
+        ver_z = int(self.cfg.get("ext_ver_z", 0))
+        version_tuple = [ver_x, ver_y, ver_z]
+
+        desc = (
+            f"§lFirst use restart the game!\n"
+            f"Original Creator : Han's404 | Youtube: @zxyn404 ( Han's )\n"
+            f"Extension Creator : {creator}"
+        )
+
         data = {
             "format_version": 2,
             "header": {
-                "description": f"§lFirst use restart the game!\nOriginal Creator : Han's404 | Youtube: @zxyn404 ( Han's )\nExtension Creator : {creator}",
+                "description": desc,
                 "name": f"§l§dHorizon§bUI: {ext_name}",
                 "uuid": str(uuid.uuid4()),
-                "version": [201, 1, 0],
+                "version": version_tuple,
                 "min_engine_version": [1, 21, 114]
             },
             "modules": [{
-                "description": f"§lFirst use restart the game!\nOriginal Creator : Han's404 | Youtube: @zxyn404 ( Han's )\nExtension Creator : {creator}",
+                "description": desc,
                 "type": "resources",
                 "uuid": str(uuid.uuid4()),
-                "version": [201, 1, 0]
+                "version": version_tuple
             }]
         }
+
+        # ── Both mode: add subpacks list ───────────────────────────────────
+        if self.cfg.get("bg_mode") == "both":
+            data["subpacks"] = [
+                {
+                    "folder_name": "static",
+                    "name": "Background: Static [ Unanimated§f ]",
+                    "memory_tier": 1
+                },
+                {
+                    "folder_name": "dynamic",
+                    "name": "Background: Dynamic [ Animated ]",
+                    "memory_tier": 1
+                }
+            ]
+            self.log("manifest.json: subpacks (static + dynamic) added ✓")
+
         out = pack_root / "manifest.json"
         out.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
-        self.log("manifest.json generated ✓")
+        self.log(f"manifest.json generated ✓  (version {ver_x}.{ver_y}.{ver_z})")
 
     def _gen_global_variables(self, pack_root: Path):
         creator = self.cfg.get("creator", "Unknown")
+        ver_x   = int(self.cfg.get("ext_ver_x", 201))
+        ver_y   = int(self.cfg.get("ext_ver_y", 1))
+        ver_z   = int(self.cfg.get("ext_ver_z", 0))
         content = f"""{{
   /* -------------------------- EXTENSION -------------------------- */
   // To display Extension Version and Extension Creator Name in NekoUI About Settings
@@ -1124,7 +1744,7 @@ class Worker(QtCore.QThread):
 
   "$hrzn.ui.use_extension": true,
   "$hrzn.ui.creator_name": "{creator}",
-  "$hrzn.ui.extension_version": "201.1.0", // Numbers only!
+  "$hrzn.ui.extension_version": "{ver_x}.{ver_y}.{ver_z}", // Numbers only!
   "$duration_per_frame": 0.05, // Main Screen UI
   "$duration_loading_per_frame": 2, // Loading Screen UI
 
@@ -1274,6 +1894,124 @@ class Worker(QtCore.QThread):
         result = self._order_result
         return result if result else None
 
+    # ── Background mode helpers ──────────────────────────────────────────────
+
+    def _extract_frame_static(self, video: "Path", pack_root: "Path") -> "Path":
+        """
+        Static mode: extract exactly ONE frame (the first frame of the
+        requested time range) into hrzn_animated_background.
+        """
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / ANIM_BG_DIR
+        if dst.exists(): shutil.rmtree(dst)
+        self._ensure_dir(dst)
+
+        out_pattern = dst / f"{FRAME_PREFIX_ANIM}%03d.png"
+        self.log(f"Static mode: extracting 1 frame -> {dst}")
+
+        args = ["-y"]
+        if not self.cfg.get("is_trimmed"):
+            ss = self.cfg.get("start_seconds")
+            if ss is not None: args += ["-ss", str(ss)]
+        args += ["-i", str(video), "-vf", "fps=1", "-frames:v", "1", str(out_pattern)]
+        self._run_ffmpeg(args)
+        self.log(f"Static frame extracted -> {dst}")
+        return dst
+
+    def _make_blur_png_for_dir(self, anim_dir: "Path"):
+        """Create blur.png from the first frame found in anim_dir."""
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
+        if not frames:
+            raise FileNotFoundError(f"No frames in {anim_dir} to create blur.png.")
+        src = frames[0]
+        blur_out = anim_dir / "blur.png"
+        try:
+            import cv2
+            img = cv2.imread(str(src))
+            if img is not None:
+                blurred = cv2.GaussianBlur(img, (31, 31), 0)
+                cv2.imwrite(str(blur_out), blurred)
+                self.log(f"blur.png created via OpenCV -> {blur_out}")
+                return
+        except Exception as e:
+            self.log(f"OpenCV blur failed: {e}, falling back to Pillow...")
+        im = Image.open(src)
+        im.filter(ImageFilter.GaussianBlur(radius=15)).save(blur_out)
+        self.log(f"blur.png created via Pillow -> {blur_out}")
+
+    def _gen_bg_anim_json_for_dir(self, anim_dir: "Path", dest_root: "Path"):
+        """
+        Generate .hrzn_public_bg_anim.json into dest_root based on
+        frames present in anim_dir (supports both .png and .jpg).
+        """
+        frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
+        if not frames:
+            frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.jpg"))
+        n = len(frames)
+        if n == 0:
+            self.log(f"No frames in {anim_dir} - skipping .hrzn_public_bg_anim.json")
+            return
+
+        lines = []
+        lines.append('  "namespace": "hrzn_ui_wextension",')
+        lines.append('  "hrzn_ui_settings_bg@core_img": { "texture": "hrzn_animated_background/blur" },')
+        lines.append('  "img": { "type": "image", "fill": true, "property_bag": {"#true": "0"}, "bindings": [ { "binding_name": "#collection_index", "binding_type": "collection_details", "binding_collection_name": "animated_background" }, { "binding_type": "view", "source_property_name": "(\'#\' + (#collection_index < 9))", "target_property_name": "#pad00" }, { "binding_type": "view", "source_property_name": "(\'#\' + (#collection_index < 99))", "target_property_name": "#pad0" }, { "binding_type": "view", "source_property_name": "(\'hrzn_animated_background/hans\' + \'_common_\' + #pad00 + #pad0 + (#collection_index + 1))", "target_property_name": "#texture" } ] },')
+        lines.append(f'  "hrzn_ui_main_bg": {{ "size": [ "100%", "100%" ], "type": "stack_panel", "anchor_from": "top_left", "anchor_to": "top_left", "offset": "@hrzn_ui_wextension.01", "$duration_per_frame|default": 0.03333333, "$frames|default": {n}, "collection_name": "animated_background", "factory": {{"name": "test", "control_name": "hrzn_ui_wextension.img"}}, "property_bag": {{"#frames": "$frames"}}, "bindings": [ {{ "binding_type": "view", "source_property_name": "(#frames*1)", "target_property_name": "#collection_length" }} ] }},')
+        lines.append('  "hans_anim_base": { "destroy_at_end": "@hrzn_ui_wextension.bg_anim", "anim_type": "offset", "easing": "linear", "duration": "$duration_per_frame", "from": "$anm_offset", "to": "$anm_offset" },')
+        lines.append('')
+
+        for i in range(1, n + 1):
+            key      = f"{i:02d}"
+            y_pct    = "0%" if i == 1 else f"-{(i-1)*100}%"
+            next_key = f"{(i % n) + 1:02d}"
+            lines.append(f'  "{key}@hrzn_ui_wextension.hans_anim_base":{{"$anm_offset": [ "0px", "{y_pct}" ],"next": "@hrzn_ui_wextension.{next_key}"}},')
+
+        lines[-1] = lines[-1].rstrip(",")
+        content = "{\n" + "\n".join(lines) + "\n}"
+        out_path = dest_root / ".hrzn_public_bg_anim.json"
+        out_path.write_text(content, encoding="utf-8")
+        self.log(f".hrzn_public_bg_anim.json generated ({n} frame(s)) -> {out_path}")
+
+    def _build_both_subpacks(self, video: "Path", pack_root: "Path") -> "Path":
+        """
+        Both mode:
+        - Extract N frames -> ./hrzn_animated_background  (dynamic)
+        - Copy frame 001   -> ./subpacks/static/hrzn_animated_background/
+        - blur.png         -> ./subpacks/static/hrzn_animated_background/
+        - .hrzn_public_bg_anim.json (1 frame) -> ./subpacks/static/
+        Returns the main anim_dir.
+        """
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+
+        # Full animated frames in the main pack
+        anim_dir = self._extract_frames_anim(video, pack_root)
+
+        # Static subpack directory
+        static_anim_dir = pack_root / "subpacks" / "static" / ANIM_BG_DIR
+        self._ensure_dir(static_anim_dir)
+
+        frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
+        if not frames:
+            self.log("No anim frames found - skipping static subpack.")
+            return anim_dir
+
+        first_frame = frames[0]
+        shutil.copy2(first_frame, static_anim_dir / first_frame.name)
+        self.log(f"Static subpack: copied {first_frame.name} -> {static_anim_dir}")
+
+        # blur.png for static subpack
+        self._make_blur_png_for_dir(static_anim_dir)
+
+        # .hrzn_public_bg_anim.json (1 frame) for static subpack
+        static_root = pack_root / "subpacks" / "static"
+        self._gen_bg_anim_json_for_dir(static_anim_dir, static_root)
+
+        self.log("Both mode: dynamic + static subpack prepared")
+        return anim_dir
+
+    # ────────────────────────────────────────────────────────────────────────
+
     def _get_compressor(self, method: str):
         m = {
             "tinypng": TinyPNGCompressor, "imagecompressr": ImageCompressrCompressor,
@@ -1287,7 +2025,7 @@ class Worker(QtCore.QThread):
 
     def process(self):
         self._monitor_memory()
-        total_steps = 14
+        total_steps = 15   # +1 for pack icon step
         step = [0]
 
         def tick(label=""):
@@ -1324,8 +2062,19 @@ class Worker(QtCore.QThread):
             self.cfg["is_trimmed"] = False
         tick("Video ready")
 
-        anim_dir = self._extract_frames_anim(video, pack_root)
-        tick("Animated background frames extracted")
+        # ── Background mode: dynamic / static / both ───────────────────────
+        bg_mode = self.cfg.get("bg_mode", "dynamic")   # "dynamic" | "static" | "both"
+        self.log(f"Background mode: {bg_mode}")
+
+        if bg_mode == "static":
+            anim_dir = self._extract_frame_static(video, pack_root)
+            tick("Static background frame extracted")
+        elif bg_mode == "both":
+            anim_dir = self._build_both_subpacks(video, pack_root)
+            tick("Dynamic + static subpack frames prepared")
+        else:  # dynamic (default)
+            anim_dir = self._extract_frames_anim(video, pack_root)
+            tick("Animated background frames extracted")
 
         if self.cfg.get("loading_bg_folder", "").strip():
             self._copy_loading_bg_folder(pack_root)
@@ -1335,7 +2084,7 @@ class Worker(QtCore.QThread):
             load_dir = self._extract_frames_loading(video, pack_root)
             tick("Loading background frames extracted")
 
-        self._make_blur_png(anim_dir)
+        self._make_blur_png_for_dir(anim_dir)
         tick("blur.png created")
 
         method = self.cfg.get("compress_method", "lossless").lower()
@@ -1360,6 +2109,9 @@ class Worker(QtCore.QThread):
         else:
             self._download_audio(video, pack_root)
         tick("Audio prepared")
+
+        self._copy_pack_icon(pack_root)
+        tick("Pack icon copied")
 
         self._gen_bg_anim_json(anim_dir, pack_root)
         self._gen_bg_load_json(load_dir, pack_root)
@@ -1389,12 +2141,13 @@ class Worker(QtCore.QThread):
 
 class MainWindow(QWidget):
     def __init__(self):
-        print(f"[BOOTSTRAP] Almost there!")
         super().__init__()
         self.worker = None
+        self._pack_icon_pil  = None
+        self._pack_icon_path = ""
         self.setWindowTitle(WINDOW_TITLE)
-        self.setMinimumWidth(720)
-        self.setMinimumHeight(720)
+        self.setMinimumWidth(860)
+        self.setMinimumHeight(740)
         self._set_icon_from_url("https://www.dropbox.com/scl/fi/yymr5hnfkko77aaxadjta/logo_bigger.png?rlkey=gicau4lxtbbhmq9vt2reyrk8c&st=kvv7wolj&dl=1")
         self._build_ui()
 
@@ -1421,7 +2174,7 @@ class MainWindow(QWidget):
         root.addWidget(splitter)
 
         left_outer = QWidget()
-        left_outer.setMinimumWidth(360)
+        left_outer.setMinimumWidth(480)
         left_vbox = QVBoxLayout(left_outer)
         left_vbox.setContentsMargins(0, 0, 0, 0)
         left_vbox.setSpacing(4)
@@ -1462,17 +2215,146 @@ class MainWindow(QWidget):
                 g.addWidget(widget, r, 1, 1, 2)
             r += 1
 
+        # ── OUTPUT section ────────────────────────────────────────────────
         _sec("OUTPUT")
         self.inp_output = QLineEdit(str(Path.home() / "HorizonExtensions"))
         btn_o = QPushButton("Browse…"); btn_o.clicked.connect(self.browse_output)
         _row("Output Folder:", self.inp_output, btn_o)
 
         self.inp_packname = QLineEdit("MyExtension")
-        _row("Extension Name:", self.inp_packname)
+        btn_fmt = QPushButton("Format…")
+        btn_fmt.setToolTip("Insert Minecraft § colour / style codes into the extension name")
+        btn_fmt.clicked.connect(lambda: self._open_format_dialog(self.inp_packname))
+        _row("Extension Name:", self.inp_packname, btn_fmt)
 
         self.inp_creator = QLineEdit("Unknown")
         _row("Creator Name:", self.inp_creator)
 
+        # ── Pack Icon ─────────────────────────────────────────────────────
+        self.inp_pack_icon = QLineEdit()
+        self.inp_pack_icon.setPlaceholderText("(optional) Select a PNG file")
+        self.inp_pack_icon.setReadOnly(True)
+        self.inp_pack_icon.setToolTip(
+            "Choose a PNG to use as the pack icon (pack_icon.png).\n"
+            "A crop & zoom dialog will appear so you can frame it perfectly.\n"
+            "If the file is already named 'pack_icon', it will be copied as-is."
+        )
+
+        # Small thumbnail label shown next to the field
+        self._icon_thumb = QLabel()
+        self._icon_thumb.setFixedSize(36, 36)
+        self._icon_thumb.setStyleSheet(
+            "border:1px solid #555; border-radius:3px; background:#1a1a1a;"
+        )
+        self._icon_thumb.setAlignment(Qt.AlignCenter)
+        self._icon_thumb.setToolTip("Pack icon preview")
+
+        btn_icon = QPushButton("Browse…")
+        btn_icon.clicked.connect(self.browse_pack_icon)
+
+        btn_icon_clear = QPushButton("✖")
+        btn_icon_clear.setFixedWidth(28)
+        btn_icon_clear.setToolTip("Clear pack icon")
+        btn_icon_clear.clicked.connect(self.clear_pack_icon)
+
+        # Lay out as: label | [thumb] [lineEdit] | [Browse] [X]
+        icon_row_widget = QWidget()
+        icon_row_h = QHBoxLayout(icon_row_widget)
+        icon_row_h.setContentsMargins(0, 0, 0, 0)
+        icon_row_h.setSpacing(4)
+        icon_row_h.addWidget(self._icon_thumb)
+        icon_row_h.addWidget(self.inp_pack_icon, stretch=1)
+
+        btn_icon_group = QWidget()
+        btn_group_h = QHBoxLayout(btn_icon_group)
+        btn_group_h.setContentsMargins(0, 0, 0, 0)
+        btn_group_h.setSpacing(2)
+        btn_group_h.addWidget(btn_icon)
+        btn_group_h.addWidget(btn_icon_clear)
+
+        _row("Pack Icon:", icon_row_widget, btn_icon_group,
+             tooltip="PNG image used as the pack icon (pack_icon.png).")
+
+        # ── Background Mode ───────────────────────────────────────────────
+        self._bg_mode_group = QButtonGroup(self)
+        self._bg_mode_group.setExclusive(True)
+
+        self.rdo_dynamic = QRadioButton("Dynamic")
+        self.rdo_dynamic.setChecked(True)
+        self.rdo_dynamic.setToolTip(
+            "Extract the requested number of frames into hrzn_animated_background.\n"
+            "Produces a fully animated background."
+        )
+
+        self.rdo_static = QRadioButton("Static")
+        self.rdo_static.setToolTip(
+            "Extract a single frame (at the start time) into hrzn_animated_background.\n"
+            "Produces a still background image — smaller pack size."
+        )
+
+        self.rdo_both = QRadioButton("Both")
+        self.rdo_both.setToolTip(
+            "Dynamic frames go into hrzn_animated_background (main pack).\n"
+            "A ./subpacks/static/ folder is also created with just the first frame\n"
+            "plus its own .hrzn_public_bg_anim.json configured for 1 frame."
+        )
+
+        for rdo in (self.rdo_dynamic, self.rdo_static, self.rdo_both):
+            self._bg_mode_group.addButton(rdo)
+
+        rdo_widget = QWidget()
+        rdo_h = QHBoxLayout(rdo_widget)
+        rdo_h.setContentsMargins(0, 0, 0, 0)
+        rdo_h.setSpacing(12)
+        rdo_h.addWidget(self.rdo_dynamic)
+        rdo_h.addWidget(self.rdo_static)
+        rdo_h.addWidget(self.rdo_both)
+        rdo_h.addStretch()
+
+        _row("Background Type:", rdo_widget,
+             tooltip="Choose how the animated background is built.")
+
+        # ── Extension Version ─────────────────────────────────────────────
+        ver_widget = QWidget()
+        ver_h = QHBoxLayout(ver_widget)
+        ver_h.setContentsMargins(0, 0, 0, 0)
+        ver_h.setSpacing(4)
+
+        def _make_ver_spin():
+            sb = QSpinBox()
+            sb.setRange(0, 99999)
+            sb.setValue(0)
+            sb.setFixedWidth(64)
+            sb.setAlignment(Qt.AlignCenter)
+            return sb
+
+        self.spn_ver_x = QSpinBox()
+        self.spn_ver_x.setRange(0, 99999)
+        self.spn_ver_x.setValue(201)
+        self.spn_ver_x.setFixedWidth(70)
+        self.spn_ver_x.setAlignment(Qt.AlignCenter)
+
+        self.spn_ver_y = _make_ver_spin()
+        self.spn_ver_y.setValue(1)
+
+        self.spn_ver_z = _make_ver_spin()
+
+        dot1 = QLabel(".")
+        dot1.setStyleSheet("font-weight:bold; font-size:14px;")
+        dot2 = QLabel(".")
+        dot2.setStyleSheet("font-weight:bold; font-size:14px;")
+
+        ver_h.addWidget(self.spn_ver_x)
+        ver_h.addWidget(dot1)
+        ver_h.addWidget(self.spn_ver_y)
+        ver_h.addWidget(dot2)
+        ver_h.addWidget(self.spn_ver_z)
+        ver_h.addStretch()
+
+        _row("Extension Version:", ver_widget,
+             tooltip="Version embedded in manifest.json — format X.Y.Z (e.g. 201.1.0)")
+
+        # ── VIDEO SOURCE section ──────────────────────────────────────────
         _sec("VIDEO SOURCE")
         self.inp_video = QLineEdit()
         self.inp_video.setPlaceholderText("Local file or YouTube URL")
@@ -1492,8 +2374,12 @@ class MainWindow(QWidget):
         _row("Anim Frames (max 100):", self.spn_anim_frames)
 
         self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, MAX_FRAMES); self.spn_load_frames.setValue(MAX_FRAMES)
-        _row("Loading Frames (max 100):", self.spn_load_frames)
+        self._lbl_load_frames = QLabel("Loading Frames (max 100):")
+        g.addWidget(self._lbl_load_frames, r, 0)
+        g.addWidget(self.spn_load_frames, r, 1, 1, 2)
+        r += 1
 
+        # ── ASSETS section ────────────────────────────────────────────────
         _sec("ASSETS")
         self.inp_bgm = QLineEdit()
         self.inp_bgm.setPlaceholderText("(optional — leave blank to extract from video)")
@@ -1511,6 +2397,11 @@ class MainWindow(QWidget):
         btn_lbg = QPushButton("Browse…"); btn_lbg.clicked.connect(self.browse_loading_bg)
         _row("Loading Background Folder:", self.inp_loading_bg, btn_lbg)
 
+        # Show "Loading Frames" only when no folder is specified
+        self.inp_loading_bg.textChanged.connect(self._toggle_load_frames_row)
+        self._toggle_load_frames_row("")   # initial state — no folder → visible
+
+        # ── COMPRESSION section ───────────────────────────────────────────
         _sec("COMPRESSION")
         self.cmb_compress = QComboBox()
         self._compress_methods = [
@@ -1607,6 +2498,7 @@ class MainWindow(QWidget):
         _ag.addWidget(self._api_stack)
         g.addWidget(api_grp, r, 0, 1, 3); r += 1
 
+        # ── Progress bar + buttons ────────────────────────────────────────
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(14)
         self.progress_bar.setTextVisible(False)
@@ -1636,8 +2528,9 @@ class MainWindow(QWidget):
 
         splitter.addWidget(left_outer)
 
+        # ── Right panel (log) ─────────────────────────────────────────────
         right_widget = QWidget()
-        right_widget.setMinimumWidth(280)
+        right_widget.setMinimumWidth(180)
         right_vbox = QVBoxLayout(right_widget)
         right_vbox.setContentsMargins(0, 0, 0, 0)
         right_vbox.setSpacing(4)
@@ -1658,7 +2551,7 @@ class MainWindow(QWidget):
         self.lbl_status = QLabel()
         self.lbl_status.setText(
             "<span style='color:#888;font-size:10px;'>"
-            "ⓘ This script is licensed under GNU v3 License."
+            "ⓘ This script is licensed under GNU v3 License."
             "</span><br>"
             "<span style='color:#666;font-size:10px;'>"
             "Made with love for HorizonUI Extension Makers!"
@@ -1671,7 +2564,19 @@ class MainWindow(QWidget):
         right_vbox.addWidget(self.lbl_status)
 
         splitter.addWidget(right_widget)
-        splitter.setSizes([420, 580])
+        splitter.setSizes([520, 360])
+
+    # ── Browse / clear helpers ────────────────────────────────────────────────
+
+    def _open_format_dialog(self, target_field: "QLineEdit"):
+        dlg = McFormatDialog(target_field, parent=self)
+        dlg.exec_()
+
+    def _toggle_load_frames_row(self, text: str):
+        """Show Loading Frames spinbox only when no Loading BG folder is set."""
+        visible = not text.strip()
+        self._lbl_load_frames.setVisible(visible)
+        self.spn_load_frames.setVisible(visible)
 
     def browse_video(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select Video", filter="Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)")
@@ -1694,9 +2599,63 @@ class MainWindow(QWidget):
         if f:
             self.inp_bgm.setText(f)
 
+    # ── Pack Icon browse / clear ──────────────────────────────────────────────
+
+    def browse_pack_icon(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select Pack Icon (PNG)",
+            filter="PNG Images (*.png);;All Files (*)"
+        )
+        if not f:
+            return
+
+        src = Path(f)
+
+        # If already named pack_icon — skip crop dialog, copy as-is
+        if src.stem.lower() == "pack_icon":
+            self._pack_icon_pil  = None
+            self._pack_icon_path = f
+            self.inp_pack_icon.setText(f"[pack_icon] {src.name}")
+            self._update_icon_thumb_from_path(f)
+            return
+
+        # Otherwise, open the crop/zoom dialog
+        dlg = PackIconCropDialog(f, parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            result_img = dlg.get_result()
+            if result_img is not None:
+                self._pack_icon_pil  = result_img
+                self._pack_icon_path = f   # kept for display only
+                self.inp_pack_icon.setText(f"[cropped] {src.name}")
+                self._update_icon_thumb_from_pil(result_img)
+        # If user cancelled the crop dialog, leave existing selection unchanged
+
+    def clear_pack_icon(self):
+        self._pack_icon_pil  = None
+        self._pack_icon_path = ""
+        self.inp_pack_icon.clear()
+        self._icon_thumb.clear()
+        self._icon_thumb.setPixmap(QPixmap())
+
+    def _update_icon_thumb_from_path(self, path: str):
+        px = QPixmap(path).scaled(
+            34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        self._icon_thumb.setPixmap(px)
+
+    def _update_icon_thumb_from_pil(self, img: "Image.Image"):
+        thumb = img.resize((34, 34), Image.LANCZOS)
+        data  = thumb.tobytes("raw", "RGBA")
+        qimg  = QtGui.QImage(data, 34, 34, QtGui.QImage.Format_RGBA8888)
+        self._icon_thumb.setPixmap(QPixmap.fromImage(qimg))
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+
     def append_log(self, s: str):
         self.log_box.append(s)
         self.log_box.moveCursor(QtGui.QTextCursor.End)
+
+    # ── Run / Cancel ──────────────────────────────────────────────────────────
 
     def run_process(self):
         video = self.inp_video.text().strip()
@@ -1744,6 +2703,15 @@ class MainWindow(QWidget):
             "ffmpeg_qv":        self.spn_ff_qv.value(),
             "pillow_quality":   self.cmb_pillow_q.currentText().lower(),
             "loading_bg_folder": self.inp_loading_bg.text().strip(),
+            # ── new fields ─────────────────────────────────────────────────
+            "pack_icon_pil":    self._pack_icon_pil,
+            "pack_icon_path":   self._pack_icon_path,
+            "ext_ver_x":        self.spn_ver_x.value(),
+            "ext_ver_y":        self.spn_ver_y.value(),
+            "ext_ver_z":        self.spn_ver_z.value(),
+            "bg_mode":          ("static" if self.rdo_static.isChecked()
+                                 else "both" if self.rdo_both.isChecked()
+                                 else "dynamic"),
         }
 
         self.btn_run.setEnabled(False)
@@ -2077,6 +3045,15 @@ _CLI_EPILOG = textwrap.dedent("""\
 
       # With a loading-background folder
       curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
+
+      # With a custom pack icon and version
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --pack-icon icon.png --ext-version 202.1.0
+
+      # Static background
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode static
+
+      # Both (dynamic + static subpack)
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode both
 """)
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -2142,6 +3119,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                      metavar="NAME",
                      default="Unknown",
                      help="creator name embedded in manifest  (default: Unknown)")
+    out.add_argument("--ext-version",
+                     metavar="X.Y.Z",
+                     default="201.1.0",
+                     help="extension version X.Y.Z embedded in manifest.json  (default: 201.1.0)")
+    out.add_argument("--pack-icon",
+                     metavar="FILE",
+                     help="PNG file used as pack_icon.png in the root of the pack.\n"
+                          "* If the filename is already 'pack_icon' -> copied as-is.\n"
+                          "* Any other name -> resized to 256x256 automatically.\n"
+                          "  In GUI mode a crop & zoom dialog is shown instead.")
+    out.add_argument("--bg-mode",
+                     metavar="MODE",
+                     default="dynamic",
+                     choices=["dynamic", "static", "both"],
+                     help="background build mode (default: dynamic):\n"
+                          "  dynamic — extract N animated frames into hrzn_animated_background\n"
+                          "  static  — extract 1 frame only into hrzn_animated_background\n"
+                          "  both    — dynamic main pack + ./subpacks/static/ (1 frame + JSON)")
 
     assets = p.add_argument_group("assets")
     assets.add_argument("--bgm",
@@ -2274,6 +3269,9 @@ def _run_interactive(args):
     bgm_name= ask("BGM track name", "bgm")
     load_bg = ask("Loading BG folder (leave blank to extract from video)", "")
     method  = ask("Compress method [lossless/pillow/ffmpeg/tinypng/kraken/imagekit/cloudinary/compressor]", "lossless")
+    ext_ver = ask("Extension version (X.Y.Z)", "201.1.0")
+    pack_icon = ask("Pack icon PNG path (leave blank to skip)", "")
+    bg_mode = ask("Background mode [dynamic/static/both]", "dynamic")
 
     cfg = _build_cfg_from_values(
         video=video, name=name, creator=creator, output=output,
@@ -2285,6 +3283,7 @@ def _run_interactive(args):
         imagekit_key="", imagekit_secret="", imagekit_endpoint="", imagekit_quality=90,
         cloudinary_name="", cloudinary_key="", cloudinary_secret="",
         cloudinary_quality="auto:best",
+        ext_version=ext_ver, pack_icon=pack_icon, bg_mode=bg_mode,
     )
     return cfg
 
@@ -2295,7 +3294,9 @@ def _build_cfg_from_values(*, video, name, creator, output,
                             tinypng_key, kraken_key, kraken_secret, kraken_quality,
                             imagekit_key, imagekit_secret, imagekit_endpoint, imagekit_quality,
                             cloudinary_name, cloudinary_key, cloudinary_secret,
-                            cloudinary_quality) -> dict:
+                            cloudinary_quality,
+                            ext_version="201.1.0", pack_icon="",
+                            bg_mode="dynamic") -> dict:
     try:
         start_sec = Worker.parse_time(start) if start else 0
         end_sec   = Worker.parse_time(end)   if end   else 30
@@ -2308,6 +3309,25 @@ def _build_cfg_from_values(*, video, name, creator, output,
     if not bgm_name and bgm:
         bgm_name = Path(bgm).stem
     bgm_name = bgm_name or "bgm"
+
+    # Parse version string X.Y.Z
+    ver_parts = [int(v) for v in (ext_version or "201.1.0").split(".")[:3]]
+    while len(ver_parts) < 3:
+        ver_parts.append(0)
+
+    # CLI: for pack_icon, resize to 256×256 without crop dialog
+    pack_icon_pil  = None
+    pack_icon_path = pack_icon or ""
+    if pack_icon_path:
+        src = Path(pack_icon_path)
+        if src.exists() and src.stem.lower() != "pack_icon":
+            try:
+                img = Image.open(str(src)).convert("RGBA")
+                pack_icon_pil = img.resize((256, 256), Image.LANCZOS)
+                pack_icon_path = ""   # signal worker to use pil version
+            except Exception as e:
+                print(f"⚠️ Could not load pack icon: {e}")
+                pack_icon_path = ""
 
     return {
         "video_path":            video,
@@ -2337,6 +3357,13 @@ def _build_cfg_from_values(*, video, name, creator, output,
         "cloudinary_secret":     cloudinary_secret or "",
         "cloudinary_quality":    cloudinary_quality,
         "loading_bg_folder":     loading_bg or "",
+        # new
+        "ext_ver_x":             ver_parts[0],
+        "ext_ver_y":             ver_parts[1],
+        "ext_ver_z":             ver_parts[2],
+        "pack_icon_pil":         pack_icon_pil,
+        "pack_icon_path":        pack_icon_path,
+        "bg_mode":               bg_mode,
     }
 
 def _run_cli(args):
@@ -2372,6 +3399,9 @@ def _run_cli(args):
             cloudinary_key=args.cloudinary_key or "",
             cloudinary_secret=args.cloudinary_secret or "",
             cloudinary_quality=args.cloudinary_quality,
+            ext_version=args.ext_version,
+            pack_icon=args.pack_icon or "",
+            bg_mode=args.bg_mode,
         )
 
     worker = _CLIWorker(cfg, quiet=args.quiet)
@@ -2380,7 +3410,9 @@ def _run_cli(args):
         print(f"\n▶  Building: {cfg['new_pack_name']}")
         print(f"   Source  : {cfg['video_path']}")
         print(f"   Output  : {cfg['output_folder']}")
-        print(f"   Compress: {cfg['compress_method']}\n")
+        print(f"   Compress: {cfg['compress_method']}")
+        print(f"   Version : {cfg['ext_ver_x']}.{cfg['ext_ver_y']}.{cfg['ext_ver_z']}")
+        print(f"   BG Mode : {cfg['bg_mode']}\n")
 
     try:
         worker.process()
@@ -2401,6 +3433,7 @@ _CLI_FLAGS = {
     "--cloudinary-name", "--cloudinary-key", "--cloudinary-secret", "--cloudinary-quality",
     "--interactive", "-i", "--quiet", "-q", "--skip-bootstrap",
     "--help", "-h",
+    "--ext-version", "--pack-icon", "--bg-mode",
 }
 
 def _wants_cli(argv) -> bool:
