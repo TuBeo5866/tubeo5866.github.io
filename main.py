@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 if {"-h", "--help"} & set(sys.argv[1:]):
     import argparse, textwrap
 
-    _HELP_DESC = textwrap.dedent("""\        Horizon UI Extension Studio — CLI
+    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
         ──────────────────────────────────────────────────────────────────────────
         Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
         URL, or a single image file, without opening the graphical interface.
@@ -17,7 +17,7 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
         Run without any options to launch the full GUI instead.
     """)
-    _HELP_EPILOG = textwrap.dedent("""\        examples:
+    _HELP_EPILOG = textwrap.dedent("""        examples:
           # Interactive mode (recommended for first-time use)
           curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -2869,7 +2869,7 @@ class MainWindow(QWidget):
         else:
             event.accept()
 
-LICENSE_TEXT = """\
+LICENSE_TEXT = """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║            HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -3083,7 +3083,7 @@ def _check_license(app: "QApplication") -> bool:
 import argparse
 import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
+_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
     ──────────────────────────────────────────────────────────────────────────
     Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
     URL, or a single image file, without opening the graphical interface.
@@ -3096,7 +3096,7 @@ _CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
     Run without any options to launch the full GUI instead.
 """)
 
-_CLI_EPILOG = textwrap.dedent("""\    examples:
+_CLI_EPILOG = textwrap.dedent("""    examples:
       # Interactive mode (recommended for first-time use)
       curl -fsSL https://hrz-maker.tubeo5866.com | python
 
