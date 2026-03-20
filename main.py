@@ -3548,6 +3548,7 @@ def main():
             sys.exit(0)
 
         w = MainWindow()
+        w.setWindowOpacity(0.85)
         w.show()
         sys.exit(app.exec_())
 
