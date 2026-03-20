@@ -2148,7 +2148,7 @@ class MainWindow(QWidget):
         self._pack_icon_path = ""
         self.setWindowTitle(WINDOW_TITLE)
         self.setMinimumWidth(860)
-        self.setMinimumHeight(740)
+        self.setMinimumHeight(760)
         self._set_icon_from_url("https://www.dropbox.com/scl/fi/yymr5hnfkko77aaxadjta/logo_bigger.png?rlkey=gicau4lxtbbhmq9vt2reyrk8c&st=kvv7wolj&dl=1")
         self._build_ui()
 
