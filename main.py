@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 if {"-h", "--help"} & set(sys.argv[1:]):
     import argparse, textwrap
 
-    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
+    _HELP_DESC = textwrap.dedent("""\        Horizon UI Extension Studio — CLI
         ──────────────────────────────────────────────────────────────────────────
         Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
         URL, or a single image file, without opening the graphical interface.
@@ -17,7 +17,7 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
         Run without any options to launch the full GUI instead.
     """)
-    _HELP_EPILOG = textwrap.dedent("""        examples:
+    _HELP_EPILOG = textwrap.dedent("""\        examples:
           # Interactive mode (recommended for first-time use)
           curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -2188,6 +2188,7 @@ class MainWindow(QWidget):
         g.setSpacing(6)
         g.setContentsMargins(4, 4, 4, 4)
         g.setColumnStretch(1, 1)
+        self._form_widget = form_widget
         scroll.setWidget(form_widget)
         left_vbox.addWidget(scroll, stretch=1)
 
@@ -2775,6 +2776,7 @@ class MainWindow(QWidget):
 
         self.btn_run.setEnabled(False)
         self.btn_cancel.setEnabled(True)
+        self._form_widget.setEnabled(False)
         self.progress_bar.setValue(0)
         self.worker = Worker(cfg)
         self.worker.log_signal.connect(self.append_log)
@@ -2801,11 +2803,13 @@ class MainWindow(QWidget):
                 self.worker.stop()
                 self.worker.wait()
                 self.append_log("=== Cancelled ===")
+                self._form_widget.setEnabled(True)
                 self.btn_run.setEnabled(True)
                 self.btn_cancel.setEnabled(False)
 
     def on_done(self, ok: bool, msg: str):
         self.append_log(f"=== {'Done' if ok else 'Error'} ===")
+        self._form_widget.setEnabled(True)
         self.btn_run.setEnabled(True)
         self.btn_cancel.setEnabled(False)
         self.progress_bar.setValue(100 if ok else 0)
@@ -2813,7 +2817,7 @@ class MainWindow(QWidget):
 
     def show_cli_help(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle("CLI Help")
+        dlg.setWindowTitle("CLI Help — horizon_studio.py")
         dlg.setMinimumSize(680, 500)
         dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
@@ -3079,7 +3083,7 @@ def _check_license(app: "QApplication") -> bool:
 import argparse
 import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
+_CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
     ──────────────────────────────────────────────────────────────────────────
     Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
     URL, or a single image file, without opening the graphical interface.
@@ -3092,7 +3096,7 @@ _CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
     Run without any options to launch the full GUI instead.
 """)
 
-_CLI_EPILOG = textwrap.dedent("""    examples:
+_CLI_EPILOG = textwrap.dedent("""\    examples:
       # Interactive mode (recommended for first-time use)
       curl -fsSL https://hrz-maker.tubeo5866.com | python
 
