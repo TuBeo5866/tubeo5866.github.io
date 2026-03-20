@@ -3,20 +3,21 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 
 if {"-h", "--help"} & set(sys.argv[1:]):
-    # _build_arg_parser() is defined later in the file; we inline a minimal
-    # version here so --help works before any heavy imports happen.
     import argparse, textwrap
 
-    _HELP_DESC = textwrap.dedent("""\
-        Horizon UI Extension Studio — CLI
+    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
         ──────────────────────────────────────────────────────────────────────────
-        Build Minecraft Bedrock .mcpack extensions from a local video or YouTube
-        URL without opening the graphical interface.
+        Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
+        URL, or a single image file, without opening the graphical interface.
+
+        Sources supported:
+          • Video file (MP4, MOV, MKV, AVI, WEBM …)
+          • YouTube URL
+          • Image file (PNG, JPG, JPEG, WEBP, BMP, TGA) via --image
 
         Run without any options to launch the full GUI instead.
     """)
-    _HELP_EPILOG = textwrap.dedent("""\
-        examples:
+    _HELP_EPILOG = textwrap.dedent("""        examples:
           # Interactive mode (recommended for first-time use)
           curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -40,6 +41,15 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
           # Both (dynamic + static subpack)
           curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode both
+
+          # Image as background (PNG — used directly)
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --image background.png --name MyPack
+
+          # Image as background (non-PNG — auto-converted)
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --image wallpaper.jpg --name MyPack --bgm bgm.ogg
+
+          # Image with custom loading screens folder
+          curl -fsSL https://hrz-maker.tubeo5866.com | python --image bg.webp --name MyPack --loading-bg ./screens/
     """)
 
     _hp = argparse.ArgumentParser(
@@ -50,11 +60,12 @@ if {"-h", "--help"} & set(sys.argv[1:]):
     )
     _src = _hp.add_argument_group("source")
     _src.add_argument("--video",       metavar="PATH_OR_URL", help="local video file or YouTube URL")
-    _src.add_argument("--start",       metavar="TIME",        help="start time in seconds or mm:ss  (default: 0)")
-    _src.add_argument("--end",         metavar="TIME",        help="end time in seconds or mm:ss  (default: 30)")
-    _src.add_argument("--fps",         metavar="N",           help="frame extraction FPS  (default: 20)")
-    _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames, max 100  (default: 100)")
-    _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames, max 100  (default: 100)")
+    _src.add_argument("--image",       metavar="FILE",        help="use a single image (PNG/JPG/WEBP/BMP/TGA) as background instead of a video. Non-PNG images are auto-converted.")
+    _src.add_argument("--start",       metavar="TIME",        help="start time in seconds or mm:ss  (default: 0)  [video only]")
+    _src.add_argument("--end",         metavar="TIME",        help="end time in seconds or mm:ss  (default: 30)  [video only]")
+    _src.add_argument("--fps",         metavar="N",           help="frame extraction FPS  (default: 20)  [video only]")
+    _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames, max 100  (default: 100)  [video only]")
+    _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames, max 100  (default: 100)  [video only]")
     _out = _hp.add_argument_group("output")
     _out.add_argument("--output",      "-o", metavar="DIR",   help="output directory  (default: ~/HorizonExtensions)")
     _out.add_argument("--name",        "-n", metavar="NAME",  help="extension / pack name  (default: MyExtension)")
@@ -69,12 +80,12 @@ if {"-h", "--help"} & set(sys.argv[1:]):
                       default="dynamic",
                       help="background build mode: dynamic | static | both  (default: dynamic)\n"
                            "  dynamic — extract N animated frames → hrzn_animated_background\n"
-                           "  static  — extract 1 frame only → hrzn_animated_background\n"
-                           "  both    — dynamic main pack + ./subpacks/static/ with 1 frame")
+                           "  static  — extract 1 frame only → hrzn_animated_background  [video only]\n"
+                           "  both    — dynamic main pack + ./subpacks/static/ with 1 frame  [video only]")
     _ass = _hp.add_argument_group("assets")
-    _ass.add_argument("--bgm",        metavar="FILE", help="background music file (.ogg/.mp3/.wav/…). Omit to extract from video.")
+    _ass.add_argument("--bgm",        metavar="FILE", help="background music file (.ogg/.mp3/.wav/…). Omit to extract from video (skipped in image mode).")
     _ass.add_argument("--bgm-name",   metavar="NAME", help="BGM track name used in sound_definitions.json  (default: bgm)")
-    _ass.add_argument("--loading-bg", metavar="DIR",  help="folder of images for loading screen. Omit to extract from video.")
+    _ass.add_argument("--loading-bg", metavar="DIR",  help="folder of images for loading screen. In image mode, background image is reused as loading frame if omitted.")
     _cmp = _hp.add_argument_group("compression")
     _cmp.add_argument("--compress",          metavar="METHOD",
                       help="compression method: lossless | pillow | ffmpeg | tinypng | kraken | imagekit | cloudinary | compressor  (default: lossless)")
@@ -566,37 +577,30 @@ CONTAINER_BG_URL    = "https://tubeo5866.github.io/files/hrzn_container_backgrou
 
 FRAME_PREFIX_ANIM   = "hans_common_"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Pack Icon Crop Dialog
-# ─────────────────────────────────────────────────────────────────────────────
-
 class PackIconCropDialog(QDialog):
     """
     Shows a preview of the selected PNG and lets the user drag a square crop
     region plus zoom with a slider. Output is always a 256×256 PNG.
     """
 
-    _PREVIEW_SIZE = 480   # square preview canvas size in pixels
+    _PREVIEW_SIZE = 480
 
     def __init__(self, image_path: str, parent=None):
         super().__init__(parent)
         self._src_path = Path(image_path)
         self._orig_pil = Image.open(str(self._src_path)).convert("RGBA")
-        self._zoom      = 1.0        # 1.0 = fit-to-canvas
-        self._offset_x  = 0         # top-left of the cropped view in source pixels
+        self._zoom      = 1.0
+        self._offset_x  = 0
         self._offset_y  = 0
         self._drag_start = None
         self._drag_offset_start = None
-        self._result_pil = None      # set on accept
+        self._result_pil = None
 
         self.setWindowTitle("Crop & Zoom Pack Icon")
         self.setFixedSize(self._PREVIEW_SIZE + 40, self._PREVIEW_SIZE + 160)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self._build()
         self._reset_view()
-
-    # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -607,7 +611,6 @@ class PackIconCropDialog(QDialog):
         hdr.setStyleSheet("font-weight:bold; font-size:11px;")
         layout.addWidget(hdr)
 
-        # Canvas label used as drawing surface
         self._canvas = QLabel()
         self._canvas.setFixedSize(self._PREVIEW_SIZE, self._PREVIEW_SIZE)
         self._canvas.setStyleSheet(
@@ -621,11 +624,10 @@ class PackIconCropDialog(QDialog):
         self._canvas.wheelEvent        = self._on_wheel
         layout.addWidget(self._canvas, alignment=Qt.AlignHCenter)
 
-        # Zoom slider
         zoom_row = QHBoxLayout()
         zoom_row.addWidget(QLabel("Zoom:"))
         self._slider = QSlider(Qt.Horizontal)
-        self._slider.setRange(10, 500)   # 0.1× … 5.0×
+        self._slider.setRange(10, 500)
         self._slider.setValue(100)
         self._slider.setTickInterval(10)
         self._slider.valueChanged.connect(self._on_slider_zoom)
@@ -635,12 +637,10 @@ class PackIconCropDialog(QDialog):
         zoom_row.addWidget(self._zoom_lbl)
         layout.addLayout(zoom_row)
 
-        # Reset button
         btn_reset = QPushButton("↺  Reset View")
         btn_reset.clicked.connect(self._reset_view)
         layout.addWidget(btn_reset)
 
-        # OK / Cancel
         sep = QFrame(); sep.setFrameShape(QFrame.HLine); sep.setFrameShadow(QFrame.Sunken)
         layout.addWidget(sep)
         btn_row = QHBoxLayout()
@@ -654,15 +654,11 @@ class PackIconCropDialog(QDialog):
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
 
-    # ── Geometry helpers ────────────────────────────────────────────────────
-
     def _reset_view(self):
         """Fit the whole image into the canvas (zoom so the whole image is visible)."""
         w, h = self._orig_pil.size
         short = min(w, h)
-        # zoom so short side fills canvas (= square crop showing full short side)
         self._zoom = self._PREVIEW_SIZE / short
-        # centre
         self._offset_x = (w - self._PREVIEW_SIZE / self._zoom) / 2
         self._offset_y = (h - self._PREVIEW_SIZE / self._zoom) / 2
         self._clamp_offset()
@@ -671,16 +667,13 @@ class PackIconCropDialog(QDialog):
 
     def _clamp_offset(self):
         w, h = self._orig_pil.size
-        view = self._PREVIEW_SIZE / self._zoom   # source pixels visible
-        # don't let the view go outside the image
+        view = self._PREVIEW_SIZE / self._zoom
         self._offset_x = max(0.0, min(self._offset_x, w - view))
         self._offset_y = max(0.0, min(self._offset_y, h - view))
 
-    # ── Rendering ───────────────────────────────────────────────────────────
-
     def _refresh(self):
         w, h = self._orig_pil.size
-        view = self._PREVIEW_SIZE / self._zoom   # side length in source pixels
+        view = self._PREVIEW_SIZE / self._zoom
 
         x0 = int(max(0, self._offset_x))
         y0 = int(max(0, self._offset_y))
@@ -690,13 +683,11 @@ class PackIconCropDialog(QDialog):
         cropped = self._orig_pil.crop((x0, y0, x1, y1))
         preview = cropped.resize((self._PREVIEW_SIZE, self._PREVIEW_SIZE), Image.LANCZOS)
 
-        # Convert PIL → QPixmap
         data = preview.tobytes("raw", "RGBA")
         qimg = QtGui.QImage(data, self._PREVIEW_SIZE, self._PREVIEW_SIZE,
                             QtGui.QImage.Format_RGBA8888)
         px = QPixmap.fromImage(qimg)
 
-        # Draw a subtle centre crosshair
         painter = QPainter(px)
         painter.setPen(QtGui.QPen(QColor(255, 255, 255, 80), 1))
         c = self._PREVIEW_SIZE // 2
@@ -706,8 +697,6 @@ class PackIconCropDialog(QDialog):
 
         self._canvas.setPixmap(px)
         self._zoom_lbl.setText(f"{self._zoom:.2f}×")
-
-    # ── Event handlers ──────────────────────────────────────────────────────
 
     def _on_mouse_press(self, ev):
         if ev.button() == Qt.LeftButton:
@@ -719,7 +708,6 @@ class PackIconCropDialog(QDialog):
         if self._drag_start is not None:
             dx = ev.pos().x() - self._drag_start.x()
             dy = ev.pos().y() - self._drag_start.y()
-            # pixels in source space per canvas pixel
             src_per_px = 1.0 / self._zoom
             self._offset_x = self._drag_offset_start[0] - dx * src_per_px
             self._offset_y = self._drag_offset_start[1] - dy * src_per_px
@@ -733,15 +721,12 @@ class PackIconCropDialog(QDialog):
     def _on_wheel(self, ev):
         delta = ev.angleDelta().y()
         factor = 1.1 if delta > 0 else 0.9
-        # zoom around the mouse position
         mx = ev.pos().x()
         my = ev.pos().y()
         src_per_px = 1.0 / self._zoom
-        # source coords under mouse before zoom
         sx = self._offset_x + mx * src_per_px
         sy = self._offset_y + my * src_per_px
         self._zoom = max(0.1, min(5.0, self._zoom * factor))
-        # recompute offset so the point under mouse stays fixed
         src_per_px_new = 1.0 / self._zoom
         self._offset_x = sx - mx * src_per_px_new
         self._offset_y = sy - my * src_per_px_new
@@ -753,7 +738,6 @@ class PackIconCropDialog(QDialog):
 
     def _on_slider_zoom(self, val):
         new_zoom = val / 100.0
-        # keep centre fixed
         w, h = self._orig_pil.size
         old_view = self._PREVIEW_SIZE / self._zoom
         new_view = self._PREVIEW_SIZE / new_zoom
@@ -764,8 +748,6 @@ class PackIconCropDialog(QDialog):
         self._offset_y = cy - new_view / 2
         self._clamp_offset()
         self._refresh()
-
-    # ── Accept ──────────────────────────────────────────────────────────────
 
     def _accept(self):
         w, h = self._orig_pil.size
@@ -781,11 +763,6 @@ class PackIconCropDialog(QDialog):
     def get_result(self) -> Image.Image:
         """Returns the cropped 256×256 PIL Image, or None if cancelled."""
         return self._result_pil
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Compressors
-# ─────────────────────────────────────────────────────────────────────────────
 
 class Compressor(ABC):
     def __init__(self, cfg, log_func):
@@ -924,11 +901,6 @@ class CompressorIoCompressor(Compressor):
         self.log("CompressorIo: using Pillow as fallback (Selenium optional).")
         PillowCompressor(self.cfg, self.log).compress(frame_dir)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Minecraft Text Formatter Dialog
-# ─────────────────────────────────────────────────────────────────────────────
-
 class _ObfuscatedPreview(QWidget):
     """
     Custom widget that renders a parsed sequence of (text, colour, styles, obfuscated)
@@ -938,8 +910,8 @@ class _ObfuscatedPreview(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._spans = []           # list of dicts: text, colour, bold, italic, strike, under, obfusc
-        self._rnd_cache = {}       # span_index -> current random string
+        self._spans = []
+        self._rnd_cache = {}
         self.setMinimumHeight(34)
         self.setAutoFillBackground(False)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1016,7 +988,6 @@ class _ObfuscatedPreview(QWidget):
 
         painter.end()
 
-
 class McFormatDialog(QDialog):
     """
     Small helper that lets the user insert Minecraft § colour / style codes
@@ -1024,7 +995,6 @@ class McFormatDialog(QDialog):
     renders § codes with real colours, styles, and animated obfuscation (§k).
     """
 
-    # (code, label, hex-colour for button background, text-colour)
     _COLOURS = [
         ("0", "0", "#000000", "#ffffff"),
         ("1", "1", "#0000AA", "#ffffff"),
@@ -1045,7 +1015,6 @@ class McFormatDialog(QDialog):
     ]
     _COLOUR_MAP = {code: bg for code, _, bg, _ in _COLOURS}
 
-    # (code, label, tooltip)
     _STYLES = [
         ("l", "B",  "Bold"),
         ("o", "I",  "Italic"),
@@ -1063,14 +1032,11 @@ class McFormatDialog(QDialog):
         self.setMinimumWidth(420)
         self._build()
 
-    # ── UI ──────────────────────────────────────────────────────────────────
-
     def _build(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(12, 10, 12, 10)
 
-        # ── Edit field ───────────────────────────────────────────────────
         hdr = QLabel("Text:")
         hdr.setStyleSheet("font-weight:bold; font-size:11px;")
         layout.addWidget(hdr)
@@ -1081,7 +1047,6 @@ class McFormatDialog(QDialog):
         self._edit.textChanged.connect(self._update_preview)
         layout.addWidget(self._edit)
 
-        # ── Preview widget ───────────────────────────────────────────────
         prev_hdr = QLabel("Preview:")
         prev_hdr.setStyleSheet("font-weight:bold; font-size:10px; margin-top:2px;")
         layout.addWidget(prev_hdr)
@@ -1092,7 +1057,6 @@ class McFormatDialog(QDialog):
         )
         layout.addWidget(self._preview)
 
-        # ── Colour buttons (8-per-row) ────────────────────────────────────
         col_hdr = QLabel("Colours:")
         col_hdr.setStyleSheet("font-weight:bold; font-size:10px; margin-top:4px;")
         layout.addWidget(col_hdr)
@@ -1117,7 +1081,6 @@ class McFormatDialog(QDialog):
 
         layout.addWidget(colour_grid)
 
-        # ── Style buttons ─────────────────────────────────────────────────
         style_hdr = QLabel("Styles:")
         style_hdr.setStyleSheet("font-weight:bold; font-size:10px; margin-top:4px;")
         layout.addWidget(style_hdr)
@@ -1151,13 +1114,11 @@ class McFormatDialog(QDialog):
         style_row.addStretch()
         layout.addLayout(style_row)
 
-        # ── Separator ─────────────────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setFrameShadow(QFrame.Sunken)
         layout.addWidget(sep)
 
-        # ── OK / Cancel ───────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_cancel = QPushButton("✖  Cancel")
@@ -1170,10 +1131,7 @@ class McFormatDialog(QDialog):
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
 
-        # Trigger initial preview render
         self._update_preview(self._edit.text())
-
-    # ── Helpers ─────────────────────────────────────────────────────────────
 
     def _insert(self, code: str):
         """Insert §<code> at the current cursor position."""
@@ -1237,7 +1195,6 @@ class McFormatDialog(QDialog):
     def reject(self):
         self._preview._timer.stop()
         super().reject()
-
 
 class ImageOrderDialog(QDialog):
 
@@ -1561,8 +1518,6 @@ class Worker(QtCore.QThread):
             self._run_ffmpeg(["-y", "-i", str(src), "-acodec", "libvorbis", "-q:a", "6", str(dst)])
             self.log("BGM conversion done ✓")
 
-    # ── NEW: copy pack_icon.png ──────────────────────────────────────────────
-
     def _copy_pack_icon(self, pack_root: Path):
         """
         Copy (or save the cropped version of) pack_icon.png into the root of
@@ -1572,7 +1527,7 @@ class Worker(QtCore.QThread):
         """
         if self._stop_requested: raise RuntimeError("Cancelled.")
 
-        pil_img = self.cfg.get("pack_icon_pil")          # PIL Image or None
+        pil_img = self.cfg.get("pack_icon_pil")
         raw_path = self.cfg.get("pack_icon_path", "").strip()
 
         if pil_img is not None:
@@ -1590,10 +1545,13 @@ class Worker(QtCore.QThread):
         else:
             self.log("No pack icon specified — skipping.")
 
-    # ────────────────────────────────────────────────────────────────────────
-
     def _gen_bg_anim_json(self, anim_dir: Path, pack_root: Path):
-        frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
+        _ANIM_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga"]
+        frames = []
+        for _ext in _ANIM_EXTS:
+            frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*{_ext}"))
+            if frames:
+                break
         n = len(frames)
         if n == 0:
             self.log("⚠️ No anim frames found, skipping .hrzn_public_bg_anim.json")
@@ -1683,7 +1641,6 @@ class Worker(QtCore.QThread):
         creator  = self.cfg.get("creator", "Unknown")
         ext_name = self.cfg.get("new_pack_name", "MyExtension")
 
-        # ── Extension version (X, Y, Z integers) ──────────────────────────
         ver_x = int(self.cfg.get("ext_ver_x", 201))
         ver_y = int(self.cfg.get("ext_ver_y", 1))
         ver_z = int(self.cfg.get("ext_ver_z", 0))
@@ -1712,7 +1669,6 @@ class Worker(QtCore.QThread):
             }]
         }
 
-        # ── Both mode: add subpacks list ───────────────────────────────────
         if self.cfg.get("bg_mode") == "both":
             data["subpacks"] = [
                 {
@@ -1894,8 +1850,6 @@ class Worker(QtCore.QThread):
         result = self._order_result
         return result if result else None
 
-    # ── Background mode helpers ──────────────────────────────────────────────
-
     def _extract_frame_static(self, video: "Path", pack_root: "Path") -> "Path":
         """
         Static mode: extract exactly ONE frame (the first frame of the
@@ -1916,6 +1870,32 @@ class Worker(QtCore.QThread):
         args += ["-i", str(video), "-vf", "fps=1", "-frames:v", "1", str(out_pattern)]
         self._run_ffmpeg(args)
         self.log(f"Static frame extracted -> {dst}")
+        return dst
+
+    def _use_image_as_background(self, img_src: "Path", pack_root: "Path") -> "Path":
+        """
+        Use a single image file as the animated background.
+        - If already PNG  → copy as hans_common_001.png directly.
+        - Otherwise       → convert to PNG via Pillow, save as hans_common_001.png.
+        Returns the anim_dir Path.
+        """
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / ANIM_BG_DIR
+        if dst.exists(): shutil.rmtree(dst)
+        self._ensure_dir(dst)
+
+        out_name = f"{FRAME_PREFIX_ANIM}001.png"
+        out_path = dst / out_name
+
+        if img_src.suffix.lower() == ".png":
+            shutil.copy2(img_src, out_path)
+            self.log(f"Image is already PNG — copied as {out_name}")
+        else:
+            self.log(f"Converting {img_src.name} → PNG…")
+            img = Image.open(str(img_src)).convert("RGBA")
+            img.save(str(out_path), "PNG")
+            self.log(f"Converted {img_src.name} → {out_name}")
+
         return dst
 
     def _make_blur_png_for_dir(self, anim_dir: "Path"):
@@ -1943,11 +1923,14 @@ class Worker(QtCore.QThread):
     def _gen_bg_anim_json_for_dir(self, anim_dir: "Path", dest_root: "Path"):
         """
         Generate .hrzn_public_bg_anim.json into dest_root based on
-        frames present in anim_dir (supports both .png and .jpg).
+        frames present in anim_dir (supports .png, .jpg, .jpeg, .webp, .bmp, .tga).
         """
-        frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
-        if not frames:
-            frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.jpg"))
+        _ANIM_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga"]
+        frames = []
+        for _ext in _ANIM_EXTS:
+            frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*{_ext}"))
+            if frames:
+                break
         n = len(frames)
         if n == 0:
             self.log(f"No frames in {anim_dir} - skipping .hrzn_public_bg_anim.json")
@@ -1984,10 +1967,8 @@ class Worker(QtCore.QThread):
         """
         if self._stop_requested: raise RuntimeError("Cancelled.")
 
-        # Full animated frames in the main pack
         anim_dir = self._extract_frames_anim(video, pack_root)
 
-        # Static subpack directory
         static_anim_dir = pack_root / "subpacks" / "static" / ANIM_BG_DIR
         self._ensure_dir(static_anim_dir)
 
@@ -2000,17 +1981,13 @@ class Worker(QtCore.QThread):
         shutil.copy2(first_frame, static_anim_dir / first_frame.name)
         self.log(f"Static subpack: copied {first_frame.name} -> {static_anim_dir}")
 
-        # blur.png for static subpack
         self._make_blur_png_for_dir(static_anim_dir)
 
-        # .hrzn_public_bg_anim.json (1 frame) for static subpack
         static_root = pack_root / "subpacks" / "static"
         self._gen_bg_anim_json_for_dir(static_anim_dir, static_root)
 
         self.log("Both mode: dynamic + static subpack prepared")
         return anim_dir
-
-    # ────────────────────────────────────────────────────────────────────────
 
     def _get_compressor(self, method: str):
         m = {
@@ -2025,7 +2002,7 @@ class Worker(QtCore.QThread):
 
     def process(self):
         self._monitor_memory()
-        total_steps = 15   # +1 for pack icon step
+        total_steps = 15
         step = [0]
 
         def tick(label=""):
@@ -2049,40 +2026,64 @@ class Worker(QtCore.QThread):
         tick("Folder structure created")
 
         video_input = self.cfg["video_path"]
+        source_is_image = self.cfg.get("source_is_image", False)
         delete_after = False
-        if re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
-            self.cfg["is_trimmed"] = False
-            video = self._download_youtube(video_input, output_folder / "_tmp_yt")
-            self._temp_files.append(video.parent)
-            delete_after = True
+
+        if source_is_image:
+            img_src = Path(video_input).resolve()
+            if not img_src.exists():
+                raise FileNotFoundError(f"Image not found: {img_src}")
+            video = None
+            tick("Image source ready")
+
+            anim_dir = self._use_image_as_background(img_src, pack_root)
+            tick("Image placed as background frame")
+
+            if self.cfg.get("loading_bg_folder", "").strip():
+                self._copy_loading_bg_folder(pack_root)
+                load_dir = pack_root / LOADING_BG_DIR
+                tick("Loading background images copied from folder")
+            else:
+                load_dir = pack_root / LOADING_BG_DIR
+                self._ensure_dir(load_dir)
+                src_frame = anim_dir / f"{FRAME_PREFIX_ANIM}001.png"
+                shutil.copy2(src_frame, load_dir / "1.png")
+                self.log(f"Image mode: using bg image as loading frame")
+                tick("Loading background frame set from image")
+
         else:
-            video = Path(video_input).resolve()
-            if not video.exists():
-                raise FileNotFoundError(f"Video not found: {video}")
-            self.cfg["is_trimmed"] = False
-        tick("Video ready")
+            if re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
+                self.cfg["is_trimmed"] = False
+                video = self._download_youtube(video_input, output_folder / "_tmp_yt")
+                self._temp_files.append(video.parent)
+                delete_after = True
+            else:
+                video = Path(video_input).resolve()
+                if not video.exists():
+                    raise FileNotFoundError(f"Video not found: {video}")
+                self.cfg["is_trimmed"] = False
+            tick("Video ready")
 
-        # ── Background mode: dynamic / static / both ───────────────────────
-        bg_mode = self.cfg.get("bg_mode", "dynamic")   # "dynamic" | "static" | "both"
-        self.log(f"Background mode: {bg_mode}")
+            bg_mode = self.cfg.get("bg_mode", "dynamic")
+            self.log(f"Background mode: {bg_mode}")
 
-        if bg_mode == "static":
-            anim_dir = self._extract_frame_static(video, pack_root)
-            tick("Static background frame extracted")
-        elif bg_mode == "both":
-            anim_dir = self._build_both_subpacks(video, pack_root)
-            tick("Dynamic + static subpack frames prepared")
-        else:  # dynamic (default)
-            anim_dir = self._extract_frames_anim(video, pack_root)
-            tick("Animated background frames extracted")
+            if bg_mode == "static":
+                anim_dir = self._extract_frame_static(video, pack_root)
+                tick("Static background frame extracted")
+            elif bg_mode == "both":
+                anim_dir = self._build_both_subpacks(video, pack_root)
+                tick("Dynamic + static subpack frames prepared")
+            else:
+                anim_dir = self._extract_frames_anim(video, pack_root)
+                tick("Animated background frames extracted")
 
-        if self.cfg.get("loading_bg_folder", "").strip():
-            self._copy_loading_bg_folder(pack_root)
-            load_dir = pack_root / LOADING_BG_DIR
-            tick("Loading background images copied from folder")
-        else:
-            load_dir = self._extract_frames_loading(video, pack_root)
-            tick("Loading background frames extracted")
+            if self.cfg.get("loading_bg_folder", "").strip():
+                self._copy_loading_bg_folder(pack_root)
+                load_dir = pack_root / LOADING_BG_DIR
+                tick("Loading background images copied from folder")
+            else:
+                load_dir = self._extract_frames_loading(video, pack_root)
+                tick("Loading background frames extracted")
 
         self._make_blur_png_for_dir(anim_dir)
         tick("blur.png created")
@@ -2215,7 +2216,6 @@ class MainWindow(QWidget):
                 g.addWidget(widget, r, 1, 1, 2)
             r += 1
 
-        # ── OUTPUT section ────────────────────────────────────────────────
         _sec("OUTPUT")
         self.inp_output = QLineEdit(str(Path.home() / "HorizonExtensions"))
         btn_o = QPushButton("Browse…"); btn_o.clicked.connect(self.browse_output)
@@ -2230,7 +2230,6 @@ class MainWindow(QWidget):
         self.inp_creator = QLineEdit("Unknown")
         _row("Creator Name:", self.inp_creator)
 
-        # ── Pack Icon ─────────────────────────────────────────────────────
         self.inp_pack_icon = QLineEdit()
         self.inp_pack_icon.setPlaceholderText("(optional) Select a PNG file")
         self.inp_pack_icon.setReadOnly(True)
@@ -2240,7 +2239,6 @@ class MainWindow(QWidget):
             "If the file is already named 'pack_icon', it will be copied as-is."
         )
 
-        # Small thumbnail label shown next to the field
         self._icon_thumb = QLabel()
         self._icon_thumb.setFixedSize(36, 36)
         self._icon_thumb.setStyleSheet(
@@ -2257,7 +2255,6 @@ class MainWindow(QWidget):
         btn_icon_clear.setToolTip("Clear pack icon")
         btn_icon_clear.clicked.connect(self.clear_pack_icon)
 
-        # Lay out as: label | [thumb] [lineEdit] | [Browse] [X]
         icon_row_widget = QWidget()
         icon_row_h = QHBoxLayout(icon_row_widget)
         icon_row_h.setContentsMargins(0, 0, 0, 0)
@@ -2275,7 +2272,6 @@ class MainWindow(QWidget):
         _row("Pack Icon:", icon_row_widget, btn_icon_group,
              tooltip="PNG image used as the pack icon (pack_icon.png).")
 
-        # ── Background Mode ───────────────────────────────────────────────
         self._bg_mode_group = QButtonGroup(self)
         self._bg_mode_group.setExclusive(True)
 
@@ -2303,6 +2299,7 @@ class MainWindow(QWidget):
             self._bg_mode_group.addButton(rdo)
 
         rdo_widget = QWidget()
+        self._rdo_bg_widget = rdo_widget
         rdo_h = QHBoxLayout(rdo_widget)
         rdo_h.setContentsMargins(0, 0, 0, 0)
         rdo_h.setSpacing(12)
@@ -2311,10 +2308,12 @@ class MainWindow(QWidget):
         rdo_h.addWidget(self.rdo_both)
         rdo_h.addStretch()
 
-        _row("Background Type:", rdo_widget,
-             tooltip="Choose how the animated background is built.")
+        self._lbl_bg_type = QLabel("Background Type:")
+        self._lbl_bg_type.setToolTip("Choose how the animated background is built.")
+        g.addWidget(self._lbl_bg_type, r, 0)
+        g.addWidget(rdo_widget, r, 1, 1, 2)
+        r += 1
 
-        # ── Extension Version ─────────────────────────────────────────────
         ver_widget = QWidget()
         ver_h = QHBoxLayout(ver_widget)
         ver_h.setContentsMargins(0, 0, 0, 0)
@@ -2354,24 +2353,63 @@ class MainWindow(QWidget):
         _row("Extension Version:", ver_widget,
              tooltip="Version embedded in manifest.json — format X.Y.Z (e.g. 201.1.0)")
 
-        # ── VIDEO SOURCE section ──────────────────────────────────────────
-        _sec("VIDEO SOURCE")
+        _sec("SOURCES")
+
+        src_type_widget = QWidget()
+        src_type_hbox = QHBoxLayout(src_type_widget)
+        src_type_hbox.setContentsMargins(0, 0, 0, 0)
+        self.rdo_src_video = QRadioButton("Video / YouTube")
+        self.rdo_src_image = QRadioButton("Image")
+        self.rdo_src_video.setChecked(True)
+        self._src_type_group = QButtonGroup(self)
+        self._src_type_group.addButton(self.rdo_src_video, 0)
+        self._src_type_group.addButton(self.rdo_src_image, 1)
+        src_type_hbox.addWidget(self.rdo_src_video)
+        src_type_hbox.addWidget(self.rdo_src_image)
+        src_type_hbox.addStretch()
+        _row("Source Type:", src_type_widget)
+
         self.inp_video = QLineEdit()
         self.inp_video.setPlaceholderText("Local file or YouTube URL")
-        btn_v = QPushButton("Browse…"); btn_v.clicked.connect(self.browse_video)
-        _row("Video / YouTube URL:", self.inp_video, btn_v)
+        self._btn_browse_video = QPushButton("Browse…"); self._btn_browse_video.clicked.connect(self.browse_video)
+        self._lbl_video = QLabel("Video / YouTube URL:")
+        g.addWidget(self._lbl_video, r, 0)
+        g.addWidget(self.inp_video, r, 1)
+        g.addWidget(self._btn_browse_video, r, 2)
+        r += 1
+
+        self.inp_image_src = QLineEdit()
+        self.inp_image_src.setPlaceholderText("PNG, JPG, WEBP, BMP, TGA…")
+        self._btn_browse_image = QPushButton("Browse…"); self._btn_browse_image.clicked.connect(self.browse_image_source)
+        self._lbl_image_src = QLabel("Image File:")
+        g.addWidget(self._lbl_image_src, r, 0)
+        g.addWidget(self.inp_image_src, r, 1)
+        g.addWidget(self._btn_browse_image, r, 2)
+        r += 1
 
         self.inp_start = QLineEdit("0")
-        _row("Start Time (s or mm:ss):", self.inp_start)
+        self._lbl_start = QLabel("Start Time (s or mm:ss):")
+        g.addWidget(self._lbl_start, r, 0)
+        g.addWidget(self.inp_start, r, 1, 1, 2)
+        r += 1
 
         self.inp_end = QLineEdit("30")
-        _row("End Time (s or mm:ss):", self.inp_end)
+        self._lbl_end = QLabel("End Time (s or mm:ss):")
+        g.addWidget(self._lbl_end, r, 0)
+        g.addWidget(self.inp_end, r, 1, 1, 2)
+        r += 1
 
         self.spn_fps = QSpinBox(); self.spn_fps.setRange(1, 120); self.spn_fps.setValue(DEFAULT_FPS)
-        _row("Extract FPS:", self.spn_fps)
+        self._lbl_fps = QLabel("Extract FPS:")
+        g.addWidget(self._lbl_fps, r, 0)
+        g.addWidget(self.spn_fps, r, 1, 1, 2)
+        r += 1
 
         self.spn_anim_frames = QSpinBox(); self.spn_anim_frames.setRange(1, MAX_FRAMES); self.spn_anim_frames.setValue(MAX_FRAMES)
-        _row("Anim Frames (max 100):", self.spn_anim_frames)
+        self._lbl_anim_frames = QLabel("Anim Frames (max 100):")
+        g.addWidget(self._lbl_anim_frames, r, 0)
+        g.addWidget(self.spn_anim_frames, r, 1, 1, 2)
+        r += 1
 
         self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, MAX_FRAMES); self.spn_load_frames.setValue(MAX_FRAMES)
         self._lbl_load_frames = QLabel("Loading Frames (max 100):")
@@ -2379,7 +2417,8 @@ class MainWindow(QWidget):
         g.addWidget(self.spn_load_frames, r, 1, 1, 2)
         r += 1
 
-        # ── ASSETS section ────────────────────────────────────────────────
+        self.rdo_src_video.toggled.connect(self._toggle_source_type)
+        self._toggle_source_type(True)
         _sec("ASSETS")
         self.inp_bgm = QLineEdit()
         self.inp_bgm.setPlaceholderText("(optional — leave blank to extract from video)")
@@ -2397,11 +2436,9 @@ class MainWindow(QWidget):
         btn_lbg = QPushButton("Browse…"); btn_lbg.clicked.connect(self.browse_loading_bg)
         _row("Loading Background Folder:", self.inp_loading_bg, btn_lbg)
 
-        # Show "Loading Frames" only when no folder is specified
         self.inp_loading_bg.textChanged.connect(self._toggle_load_frames_row)
-        self._toggle_load_frames_row("")   # initial state — no folder → visible
+        self._toggle_load_frames_row("")
 
-        # ── COMPRESSION section ───────────────────────────────────────────
         _sec("COMPRESSION")
         self.cmb_compress = QComboBox()
         self._compress_methods = [
@@ -2498,7 +2535,6 @@ class MainWindow(QWidget):
         _ag.addWidget(self._api_stack)
         g.addWidget(api_grp, r, 0, 1, 3); r += 1
 
-        # ── Progress bar + buttons ────────────────────────────────────────
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(14)
         self.progress_bar.setTextVisible(False)
@@ -2528,7 +2564,6 @@ class MainWindow(QWidget):
 
         splitter.addWidget(left_outer)
 
-        # ── Right panel (log) ─────────────────────────────────────────────
         right_widget = QWidget()
         right_widget.setMinimumWidth(180)
         right_vbox = QVBoxLayout(right_widget)
@@ -2566,21 +2601,48 @@ class MainWindow(QWidget):
         splitter.addWidget(right_widget)
         splitter.setSizes([520, 360])
 
-    # ── Browse / clear helpers ────────────────────────────────────────────────
-
     def _open_format_dialog(self, target_field: "QLineEdit"):
         dlg = McFormatDialog(target_field, parent=self)
         dlg.exec_()
 
     def _toggle_load_frames_row(self, text: str):
-        """Show Loading Frames spinbox only when no Loading BG folder is set."""
-        visible = not text.strip()
+        """Show Loading Frames spinbox only when no Loading BG folder is set and source is video."""
+        is_video = self.rdo_src_video.isChecked()
+        visible = is_video and not text.strip()
         self._lbl_load_frames.setVisible(visible)
         self.spn_load_frames.setVisible(visible)
 
     def browse_video(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select Video", filter="Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)")
         if f: self.inp_video.setText(f)
+
+    def browse_image_source(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select Background Image",
+            filter="Images (*.png *.jpg *.jpeg *.webp *.bmp *.tga);;All Files (*)"
+        )
+        if f: self.inp_image_src.setText(f)
+
+    def _toggle_source_type(self, _checked=None):
+        """Show/hide rows depending on whether Video or Image source is chosen."""
+        is_video = self.rdo_src_video.isChecked()
+        for w in (self._lbl_video, self.inp_video, self._btn_browse_video,
+                  self._lbl_start, self.inp_start,
+                  self._lbl_end, self.inp_end,
+                  self._lbl_fps, self.spn_fps,
+                  self._lbl_anim_frames, self.spn_anim_frames):
+            w.setVisible(is_video)
+        for w in (self._lbl_image_src, self.inp_image_src, self._btn_browse_image):
+            w.setVisible(not is_video)
+        if hasattr(self, "rdo_static"):
+            self.rdo_static.setEnabled(is_video)
+            self.rdo_both.setEnabled(is_video)
+            if not is_video and not self.rdo_dynamic.isChecked():
+                self.rdo_dynamic.setChecked(True)
+        if hasattr(self, "inp_loading_bg"):
+            has_loading_folder = self.inp_loading_bg.text().strip()
+            self._lbl_load_frames.setVisible(is_video and not has_loading_folder)
+            self.spn_load_frames.setVisible(is_video and not has_loading_folder)
 
     def browse_output(self):
         d = QFileDialog.getExistingDirectory(self, "Select Output Folder")
@@ -2599,8 +2661,6 @@ class MainWindow(QWidget):
         if f:
             self.inp_bgm.setText(f)
 
-    # ── Pack Icon browse / clear ──────────────────────────────────────────────
-
     def browse_pack_icon(self):
         f, _ = QFileDialog.getOpenFileName(
             self, "Select Pack Icon (PNG)",
@@ -2611,7 +2671,6 @@ class MainWindow(QWidget):
 
         src = Path(f)
 
-        # If already named pack_icon — skip crop dialog, copy as-is
         if src.stem.lower() == "pack_icon":
             self._pack_icon_pil  = None
             self._pack_icon_path = f
@@ -2619,16 +2678,14 @@ class MainWindow(QWidget):
             self._update_icon_thumb_from_path(f)
             return
 
-        # Otherwise, open the crop/zoom dialog
         dlg = PackIconCropDialog(f, parent=self)
         if dlg.exec_() == QDialog.Accepted:
             result_img = dlg.get_result()
             if result_img is not None:
                 self._pack_icon_pil  = result_img
-                self._pack_icon_path = f   # kept for display only
+                self._pack_icon_path = f
                 self.inp_pack_icon.setText(f"[cropped] {src.name}")
                 self._update_icon_thumb_from_pil(result_img)
-        # If user cancelled the crop dialog, leave existing selection unchanged
 
     def clear_pack_icon(self):
         self._pack_icon_pil  = None
@@ -2649,34 +2706,37 @@ class MainWindow(QWidget):
         qimg  = QtGui.QImage(data, 34, 34, QtGui.QImage.Format_RGBA8888)
         self._icon_thumb.setPixmap(QPixmap.fromImage(qimg))
 
-    # ── Logging ───────────────────────────────────────────────────────────────
-
     def append_log(self, s: str):
         self.log_box.append(s)
         self.log_box.moveCursor(QtGui.QTextCursor.End)
 
-    # ── Run / Cancel ──────────────────────────────────────────────────────────
-
     def run_process(self):
-        video = self.inp_video.text().strip()
+        is_image_mode = self.rdo_src_image.isChecked()
+        video = (self.inp_image_src.text().strip() if is_image_mode
+                 else self.inp_video.text().strip())
         output = self.inp_output.text().strip()
         name = self.inp_packname.text().strip()
 
         if not video or not output or not name:
-            QMessageBox.warning(self, "Missing Fields", "Please fill in Video, Output Folder, and Extension Name.")
+            QMessageBox.warning(self, "Missing Fields",
+                "Please fill in Source, Output Folder, and Extension Name.")
             return
 
-        try:
-            start = Worker.parse_time(self.inp_start.text().strip())
-            end   = Worker.parse_time(self.inp_end.text().strip())
-        except ValueError as e:
-            QMessageBox.warning(self, "Time Error", str(e)); return
-
-        if end is not None and start is not None and end <= start:
-            QMessageBox.warning(self, "Time Error", "End Time must be greater than Start Time."); return
+        if not is_image_mode:
+            try:
+                start = Worker.parse_time(self.inp_start.text().strip())
+                end   = Worker.parse_time(self.inp_end.text().strip())
+            except ValueError as e:
+                QMessageBox.warning(self, "Time Error", str(e)); return
+            if end is not None and start is not None and end <= start:
+                QMessageBox.warning(self, "Time Error", "End Time must be greater than Start Time."); return
+        else:
+            start = None
+            end   = None
 
         cfg = {
             "video_path":       video,
+            "source_is_image":  is_image_mode,
             "output_folder":    output,
             "new_pack_name":    name,
             "creator":          self.inp_creator.text().strip(),
@@ -2703,7 +2763,6 @@ class MainWindow(QWidget):
             "ffmpeg_qv":        self.spn_ff_qv.value(),
             "pillow_quality":   self.cmb_pillow_q.currentText().lower(),
             "loading_bg_folder": self.inp_loading_bg.text().strip(),
-            # ── new fields ─────────────────────────────────────────────────
             "pack_icon_pil":    self._pack_icon_pil,
             "pack_icon_path":   self._pack_icon_path,
             "ext_ver_x":        self.spn_ver_x.value(),
@@ -2754,7 +2813,7 @@ class MainWindow(QWidget):
 
     def show_cli_help(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle("CLI Help — horizon_studio.py")
+        dlg.setWindowTitle("CLI Help")
         dlg.setMinimumSize(680, 500)
         dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
@@ -3020,17 +3079,20 @@ def _check_license(app: "QApplication") -> bool:
 import argparse
 import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""\
-    Horizon UI Extension Studio — CLI
+_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
     ──────────────────────────────────────────────────────────────────────────
-    Build Minecraft Bedrock .mcpack extensions from a local video or YouTube
-    URL without opening the graphical interface.
+    Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
+    URL, or a single image file, without opening the graphical interface.
+
+    Sources supported:
+      • Video file (MP4, MOV, MKV, AVI, WEBM …)
+      • YouTube URL
+      • Image file (PNG, JPG, JPEG, WEBP, BMP, TGA) via --image
 
     Run without any options to launch the full GUI instead.
 """)
 
-_CLI_EPILOG = textwrap.dedent("""\
-    examples:
+_CLI_EPILOG = textwrap.dedent("""    examples:
       # Interactive mode (recommended for first-time use)
       curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -3054,6 +3116,15 @@ _CLI_EPILOG = textwrap.dedent("""\
 
       # Both (dynamic + static subpack)
       curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode both
+
+      # Image as background (PNG — used directly)
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --image background.png --name MyPack
+
+      # Image as background (non-PNG — auto-converted)
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --image wallpaper.jpg --name MyPack --bgm bgm.ogg
+
+      # Image with custom loading screens folder
+      curl -fsSL https://hrz-maker.tubeo5866.com | python --image bg.webp --name MyPack --loading-bg ./screens/
 """)
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -3084,27 +3155,31 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     src.add_argument("--video",
                      metavar="PATH_OR_URL",
                      help="local video file or YouTube URL")
+    src.add_argument("--image",
+                     metavar="FILE",
+                     help="use a single image (PNG/JPG/WEBP/BMP/TGA) as the animated background "
+                          "instead of a video. Non-PNG images are auto-converted to PNG.")
     src.add_argument("--start",
                      metavar="TIME",
-                     help="start time in seconds or mm:ss  (default: 0)")
+                     help="start time in seconds or mm:ss  (default: 0)  [video only]")
     src.add_argument("--end",
                      metavar="TIME",
-                     help="end time in seconds or mm:ss  (default: 30)")
+                     help="end time in seconds or mm:ss  (default: 30)  [video only]")
     src.add_argument("--fps",
                      metavar="N",
                      type=int,
                      default=20,
-                     help="frame extraction FPS  (default: 20)")
+                     help="frame extraction FPS  (default: 20)  [video only]")
     src.add_argument("--anim-frames",
                      metavar="N",
                      type=int,
                      default=100,
-                     help="number of animated background frames, max 100  (default: 100)")
+                     help="number of animated background frames, max 100  (default: 100)  [video only]")
     src.add_argument("--load-frames",
                      metavar="N",
                      type=int,
                      default=100,
-                     help="number of loading background frames, max 100  (default: 100)")
+                     help="number of loading background frames, max 100  (default: 100)  [video only]")
 
     out = p.add_argument_group("output")
     out.add_argument("--output", "-o",
@@ -3135,21 +3210,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                      choices=["dynamic", "static", "both"],
                      help="background build mode (default: dynamic):\n"
                           "  dynamic — extract N animated frames into hrzn_animated_background\n"
-                          "  static  — extract 1 frame only into hrzn_animated_background\n"
-                          "  both    — dynamic main pack + ./subpacks/static/ (1 frame + JSON)")
+                          "  static  — 1 frame only into hrzn_animated_background  [video only]\n"
+                          "  both    — dynamic + ./subpacks/static/ (1 frame + JSON)  [video only]")
 
     assets = p.add_argument_group("assets")
     assets.add_argument("--bgm",
                         metavar="FILE",
                         help="background music file (.ogg/.mp3/.wav/…).\n"
-                             "Omit to extract from video.")
+                             "Omit to extract from video. Skipped in image mode if omitted.")
     assets.add_argument("--bgm-name",
                         metavar="NAME",
                         help="BGM track name used in sound_definitions.json  (default: bgm)")
     assets.add_argument("--loading-bg",
                         metavar="DIR",
                         help="folder of images for loading screen.\n"
-                             "Omit to extract from video.")
+                             "Omit to extract from video.\n"
+                             "In image mode, background image is reused as loading frame if omitted.")
 
     comp = p.add_argument_group("compression")
     comp.add_argument("--compress",
@@ -3310,12 +3386,10 @@ def _build_cfg_from_values(*, video, name, creator, output,
         bgm_name = Path(bgm).stem
     bgm_name = bgm_name or "bgm"
 
-    # Parse version string X.Y.Z
     ver_parts = [int(v) for v in (ext_version or "201.1.0").split(".")[:3]]
     while len(ver_parts) < 3:
         ver_parts.append(0)
 
-    # CLI: for pack_icon, resize to 256×256 without crop dialog
     pack_icon_pil  = None
     pack_icon_path = pack_icon or ""
     if pack_icon_path:
@@ -3324,7 +3398,7 @@ def _build_cfg_from_values(*, video, name, creator, output,
             try:
                 img = Image.open(str(src)).convert("RGBA")
                 pack_icon_pil = img.resize((256, 256), Image.LANCZOS)
-                pack_icon_path = ""   # signal worker to use pil version
+                pack_icon_path = ""
             except Exception as e:
                 print(f"⚠️ Could not load pack icon: {e}")
                 pack_icon_path = ""
@@ -3357,13 +3431,13 @@ def _build_cfg_from_values(*, video, name, creator, output,
         "cloudinary_secret":     cloudinary_secret or "",
         "cloudinary_quality":    cloudinary_quality,
         "loading_bg_folder":     loading_bg or "",
-        # new
         "ext_ver_x":             ver_parts[0],
         "ext_ver_y":             ver_parts[1],
         "ext_ver_z":             ver_parts[2],
         "pack_icon_pil":         pack_icon_pil,
         "pack_icon_path":        pack_icon_path,
         "bg_mode":               bg_mode,
+        "source_is_image":       False,
     }
 
 def _run_cli(args):
@@ -3371,8 +3445,15 @@ def _run_cli(args):
     if args.interactive:
         cfg = _run_interactive(args)
     else:
+        _src_video = args.video
+        _src_is_img = False
+        if getattr(args, "image", None):
+            _src_video = args.image
+            _src_is_img = True
+        if not _src_video:
+            parser.print_help(); sys.exit(0)
         cfg = _build_cfg_from_values(
-            video=args.video,
+            video=_src_video,
             name=args.name,
             creator=args.creator,
             output=args.output,
@@ -3404,6 +3485,7 @@ def _run_cli(args):
             bg_mode=args.bg_mode,
         )
 
+    cfg["source_is_image"] = _src_is_img
     worker = _CLIWorker(cfg, quiet=args.quiet)
 
     if not args.quiet:
@@ -3424,7 +3506,7 @@ def _run_cli(args):
         sys.exit(1)
 
 _CLI_FLAGS = {
-    "--video", "--name", "-n", "--output", "-o", "--creator", "-c",
+    "--video", "--image", "--name", "-n", "--output", "-o", "--creator", "-c",
     "--start", "--end", "--fps", "--anim-frames", "--load-frames",
     "--bgm", "--bgm-name", "--loading-bg",
     "--compress", "--pillow-quality", "--ffmpeg-qv",
