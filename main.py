@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 if {"-h", "--help"} & set(sys.argv[1:]):
     import argparse, textwrap
 
-    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
+    _HELP_DESC = textwrap.dedent("""\        Horizon UI Extension Studio — CLI
         ──────────────────────────────────────────────────────────────────────────
         Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
         URL, or a single image file, without opening the graphical interface.
@@ -17,7 +17,7 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
         Run without any options to launch the full GUI instead.
     """)
-    _HELP_EPILOG = textwrap.dedent("""        examples:
+    _HELP_EPILOG = textwrap.dedent("""\        examples:
           # Interactive mode (recommended for first-time use)
           curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -64,8 +64,8 @@ if {"-h", "--help"} & set(sys.argv[1:]):
     _src.add_argument("--start",       metavar="TIME",        help="start time in seconds or mm:ss  (default: 0)  [video only]")
     _src.add_argument("--end",         metavar="TIME",        help="end time in seconds or mm:ss  (default: 30)  [video only]")
     _src.add_argument("--fps",         metavar="N",           help="frame extraction FPS  (default: 20)  [video only]")
-    _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames, max 100  (default: 100)  [video only]")
-    _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames, max 100  (default: 100)  [video only]")
+    _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames  (default: 100)  [video only]")
+    _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames  (default: 100)  [video only]")
     _out = _hp.add_argument_group("output")
     _out.add_argument("--output",      "-o", metavar="DIR",   help="output directory  (default: ~/HorizonExtensions)")
     _out.add_argument("--name",        "-n", metavar="NAME",  help="extension / pack name  (default: MyExtension)")
@@ -563,7 +563,7 @@ if not _IS_HELP:
     )
 
 WINDOW_TITLE        = "Horizon UI Extension Studio - Made by TuBeo5866 - ⚠⚠ BEDROCK ONLY! ⚠⚠"
-MAX_FRAMES          = 100
+MAX_FRAMES          = 9999
 DEFAULT_FPS         = 20
 MEMORY_THRESHOLD    = 80
 
@@ -1409,7 +1409,7 @@ class Worker(QtCore.QThread):
         if dst.exists(): shutil.rmtree(dst)
         self._ensure_dir(dst)
 
-        n = min(int(self.cfg.get("anim_frames", MAX_FRAMES)), MAX_FRAMES)
+        n = int(self.cfg.get("anim_frames", MAX_FRAMES))
         out_pattern = dst / f"{FRAME_PREFIX_ANIM}%03d.png"
         self.log(f"Extracting {n} anim frames → {dst}")
 
@@ -1431,7 +1431,7 @@ class Worker(QtCore.QThread):
         if dst.exists(): shutil.rmtree(dst)
         self._ensure_dir(dst)
 
-        n = min(int(self.cfg.get("load_frames", MAX_FRAMES)), MAX_FRAMES)
+        n = int(self.cfg.get("load_frames", MAX_FRAMES))
         tmp_pat = dst / "load_%03d.png"
         fps = self.cfg.get("fps", DEFAULT_FPS)
 
@@ -2148,7 +2148,7 @@ class MainWindow(QWidget):
         self._pack_icon_path = ""
         self.setWindowTitle(WINDOW_TITLE)
         self.setMinimumWidth(860)
-        self.setMinimumHeight(760)
+        self.setMinimumHeight(740)
         self._set_icon_from_url("https://www.dropbox.com/scl/fi/yymr5hnfkko77aaxadjta/logo_bigger.png?rlkey=gicau4lxtbbhmq9vt2reyrk8c&st=kvv7wolj&dl=1")
         self._build_ui()
 
@@ -2406,14 +2406,14 @@ class MainWindow(QWidget):
         g.addWidget(self.spn_fps, r, 1, 1, 2)
         r += 1
 
-        self.spn_anim_frames = QSpinBox(); self.spn_anim_frames.setRange(1, MAX_FRAMES); self.spn_anim_frames.setValue(MAX_FRAMES)
-        self._lbl_anim_frames = QLabel("Anim Frames (max 100):")
+        self.spn_anim_frames = QSpinBox(); self.spn_anim_frames.setRange(1, 9999); self.spn_anim_frames.setValue(100)
+        self._lbl_anim_frames = QLabel("Anim Frames:")
         g.addWidget(self._lbl_anim_frames, r, 0)
         g.addWidget(self.spn_anim_frames, r, 1, 1, 2)
         r += 1
 
-        self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, MAX_FRAMES); self.spn_load_frames.setValue(MAX_FRAMES)
-        self._lbl_load_frames = QLabel("Loading Frames (max 100):")
+        self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, 9999); self.spn_load_frames.setValue(100)
+        self._lbl_load_frames = QLabel("Loading Frames:")
         g.addWidget(self._lbl_load_frames, r, 0)
         g.addWidget(self.spn_load_frames, r, 1, 1, 2)
         r += 1
@@ -2869,7 +2869,7 @@ class MainWindow(QWidget):
         else:
             event.accept()
 
-LICENSE_TEXT = """
+LICENSE_TEXT = """\
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║            HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -3083,7 +3083,7 @@ def _check_license(app: "QApplication") -> bool:
 import argparse
 import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
+_CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
     ──────────────────────────────────────────────────────────────────────────
     Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
     URL, or a single image file, without opening the graphical interface.
@@ -3096,7 +3096,7 @@ _CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
     Run without any options to launch the full GUI instead.
 """)
 
-_CLI_EPILOG = textwrap.dedent("""    examples:
+_CLI_EPILOG = textwrap.dedent("""\    examples:
       # Interactive mode (recommended for first-time use)
       curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -3343,8 +3343,8 @@ def _run_interactive(args):
     start   = ask("Start time (s or mm:ss)", "0")
     end     = ask("End time   (s or mm:ss)", "30")
     fps     = int(ask("Extract FPS", "20") or 20)
-    anim_f  = int(ask("Anim frames (max 100)", "100") or 100)
-    load_f  = int(ask("Loading frames (max 100)", "100") or 100)
+    anim_f  = int(ask("Anim frames", "100") or 100)
+    load_f  = int(ask("Loading frames", "100") or 100)
     bgm     = ask("BGM file (leave blank to extract from video)", "")
     bgm_name= ask("BGM track name", "bgm")
     load_bg = ask("Loading BG folder (leave blank to extract from video)", "")
@@ -3417,8 +3417,8 @@ def _build_cfg_from_values(*, video, name, creator, output,
         "start_seconds":         start_sec,
         "end_seconds":           end_sec,
         "fps":                   fps,
-        "anim_frames":           min(int(anim_frames), 100),
-        "load_frames":           min(int(load_frames), 100),
+        "anim_frames":           int(anim_frames),
+        "load_frames":           int(load_frames),
         "compress_method":       compress,
         "pillow_quality":        pillow_quality,
         "ffmpeg_qv":             ffmpeg_qv,
