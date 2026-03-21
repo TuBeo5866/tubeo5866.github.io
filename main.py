@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 if {"-h", "--help"} & set(sys.argv[1:]):
     import argparse, textwrap
 
-    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
+    _HELP_DESC = textwrap.dedent("""\        Horizon UI Extension Studio — CLI
         ──────────────────────────────────────────────────────────────────────────
         Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
         URL, or a single image file, without opening the graphical interface.
@@ -17,7 +17,7 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
         Run without any options to launch the full GUI instead.
     """)
-    _HELP_EPILOG = textwrap.dedent("""        examples:
+    _HELP_EPILOG = textwrap.dedent("""\        examples:
           # Interactive mode (recommended for first-time use)
           curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -1363,16 +1363,36 @@ class Worker(QtCore.QThread):
         if mem.percent > MEMORY_THRESHOLD:
             self.log(f"⚠️ High memory: {mem.percent:.0f}%")
 
+    def _get_ytdlp_cookie_args(self) -> list:
+        """Try each installed browser in order; return --cookies-from-browser args for the first one found."""
+        browsers = ["chrome", "firefox", "edge", "brave", "opera", "chromium", "vivaldi", "safari"]
+        for browser in browsers:
+            try:
+                r = subprocess.run(
+                    ["yt-dlp", "--cookies-from-browser", browser, "--simulate",
+                     "--quiet", "--no-warnings", "https://www.youtube.com/"],
+                    capture_output=True, timeout=15
+                )
+                if r.returncode == 0:
+                    self.log(f"Using cookies from {browser}")
+                    return ["--cookies-from-browser", browser]
+            except Exception:
+                continue
+        self.log("⚠️ No browser cookies found, attempting download without cookies")
+        return []
+
     def _download_youtube(self, url: str, output_dir: Path) -> Path:
         if self._stop_requested: raise RuntimeError("Cancelled.")
         self._ensure_dir(output_dir)
         out_path = output_dir / "input_video.%(ext)s"
         start = self.cfg.get("start_seconds")
         end   = self.cfg.get("end_seconds")
-        cmd = [
-            "yt-dlp", "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            "--merge-output-format", "mp4", "-o", str(out_path), url
-        ]
+        cookie_args = self._get_ytdlp_cookie_args()
+        cmd = (
+            ["yt-dlp"] + cookie_args +
+            ["-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+             "--merge-output-format", "mp4", "-o", str(out_path), url]
+        )
         if start is not None and end is not None and end > start:
             cmd += ["--download-sections", f"*{start}-{end}"]
             self.cfg["is_trimmed"] = True
@@ -1490,7 +1510,8 @@ class Worker(QtCore.QThread):
         dst = pack_root / SOUNDS_DIR
         self._ensure_dir(dst)
         out_tmpl = dst / f"{bgm_name}.%(ext)s"
-        cmd = ["yt-dlp", "-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
+        cookie_args = self._get_ytdlp_cookie_args()
+        cmd = ["yt-dlp"] + cookie_args + ["-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
         self._run_subprocess(cmd)
         self.log("YouTube audio downloaded ✓")
 
@@ -1519,12 +1540,6 @@ class Worker(QtCore.QThread):
             self.log("BGM conversion done ✓")
 
     def _copy_pack_icon(self, pack_root: Path):
-        """
-        Copy (or save the cropped version of) pack_icon.png into the root of
-        the pack.  cfg["pack_icon_pil"] holds a ready PIL Image (256×256) if
-        the user went through the crop dialog, or cfg["pack_icon_path"] holds
-        a raw path that is already named pack_icon.png.
-        """
         if self._stop_requested: raise RuntimeError("Cancelled.")
 
         pil_img = self.cfg.get("pack_icon_pil")
@@ -1851,10 +1866,6 @@ class Worker(QtCore.QThread):
         return result if result else None
 
     def _extract_frame_static(self, video: "Path", pack_root: "Path") -> "Path":
-        """
-        Static mode: extract exactly ONE frame (the first frame of the
-        requested time range) into hrzn_animated_background.
-        """
         if self._stop_requested: raise RuntimeError("Cancelled.")
         dst = pack_root / ANIM_BG_DIR
         if dst.exists(): shutil.rmtree(dst)
@@ -1873,12 +1884,6 @@ class Worker(QtCore.QThread):
         return dst
 
     def _use_image_as_background(self, img_src: "Path", pack_root: "Path") -> "Path":
-        """
-        Use a single image file as the animated background.
-        - If already PNG  → copy as hans_common_001.png directly.
-        - Otherwise       → convert to PNG via Pillow, save as hans_common_001.png.
-        Returns the anim_dir Path.
-        """
         if self._stop_requested: raise RuntimeError("Cancelled.")
         dst = pack_root / ANIM_BG_DIR
         if dst.exists(): shutil.rmtree(dst)
@@ -1899,7 +1904,6 @@ class Worker(QtCore.QThread):
         return dst
 
     def _make_blur_png_for_dir(self, anim_dir: "Path"):
-        """Create blur.png from the first frame found in anim_dir."""
         if self._stop_requested: raise RuntimeError("Cancelled.")
         frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
         if not frames:
@@ -1921,10 +1925,6 @@ class Worker(QtCore.QThread):
         self.log(f"blur.png created via Pillow -> {blur_out}")
 
     def _gen_bg_anim_json_for_dir(self, anim_dir: "Path", dest_root: "Path"):
-        """
-        Generate .hrzn_public_bg_anim.json into dest_root based on
-        frames present in anim_dir (supports .png, .jpg, .jpeg, .webp, .bmp, .tga).
-        """
         _ANIM_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga"]
         frames = []
         for _ext in _ANIM_EXTS:
@@ -1957,14 +1957,6 @@ class Worker(QtCore.QThread):
         self.log(f".hrzn_public_bg_anim.json generated ({n} frame(s)) -> {out_path}")
 
     def _build_both_subpacks(self, video: "Path", pack_root: "Path") -> "Path":
-        """
-        Both mode:
-        - Extract N frames -> ./hrzn_animated_background  (dynamic)
-        - Copy frame 001   -> ./subpacks/static/hrzn_animated_background/
-        - blur.png         -> ./subpacks/static/hrzn_animated_background/
-        - .hrzn_public_bg_anim.json (1 frame) -> ./subpacks/static/
-        Returns the main anim_dir.
-        """
         if self._stop_requested: raise RuntimeError("Cancelled.")
 
         anim_dir = self._extract_frames_anim(video, pack_root)
@@ -2140,6 +2132,113 @@ class Worker(QtCore.QThread):
         self.progress_signal.emit(100)
         return True
 
+# ══════════════════════════════════════════════════════════════════════════════
+# AnnouncementBanner — NEW CLASS
+# Fetches banner.txt from the remote URL and displays it as a dismissible
+# top bar spanning the full width of the main window.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AnnouncementBanner(QWidget):
+    """
+    Fetches a plain-text announcement from a remote URL and displays it
+    as a dismissible top bar. The banner stays hidden (height=0) until
+    content arrives; it silently disappears if the fetch fails or the
+    file is empty.
+    """
+    _FETCH_URL = "https://tubeo5866.github.io/banner.txt"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFixedHeight(0)          # hidden until content arrives
+        self._build()
+        self._fetch()
+
+    # ── UI construction ───────────────────────────────────────────────────────
+    def _build(self):
+        self._hlayout = QHBoxLayout(self)
+        self._hlayout.setContentsMargins(10, 3, 6, 3)
+        self._hlayout.setSpacing(8)
+
+        # Megaphone icon
+        icon_lbl = QLabel("📢")
+        icon_lbl.setStyleSheet("font-size:14px; background:transparent;")
+        icon_lbl.setFixedWidth(22)
+
+        # Announcement text
+        self._lbl = QLabel()
+        self._lbl.setWordWrap(True)
+        self._lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self._lbl.setStyleSheet(
+            "font-size:11px; font-weight:bold; color:#ffffff; "
+            "padding-left:2px; background:transparent;"
+        )
+
+        # Dismiss button
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(20, 20)
+        btn_close.setToolTip("Dismiss announcement")
+        btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.setStyleSheet(
+            "QPushButton { background:transparent; color:#ffffffaa; border:none; "
+            "             font-size:13px; font-weight:bold; }"
+            "QPushButton:hover { color:#ffffff; }"
+        )
+        btn_close.clicked.connect(self._dismiss)
+
+        self._hlayout.addWidget(icon_lbl)
+        self._hlayout.addWidget(self._lbl, stretch=1)
+        self._hlayout.addWidget(btn_close, alignment=Qt.AlignVCenter)
+
+    # ── Custom gradient background ────────────────────────────────────────────
+    def paintEvent(self, event):
+        from PyQt5.QtGui import QLinearGradient
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        # Dark-navy → teal gradient
+        grad = QLinearGradient(0, 0, self.width(), 0)
+        grad.setColorAt(0.0, QColor("#0d1b4b"))
+        grad.setColorAt(1.0, QColor("#005f73"))
+        painter.fillRect(self.rect(), grad)
+        # Bright left-edge accent stripe
+        painter.fillRect(0, 0, 4, self.height(), QColor("#00b4d8"))
+        painter.end()
+
+    # ── Async fetch ───────────────────────────────────────────────────────────
+    def _fetch(self):
+        """Download banner text in a background QThread — UI never blocks."""
+
+        class _Fetcher(QtCore.QThread):
+            result = QtCore.pyqtSignal(str)
+
+            def run(self_inner):
+                try:
+                    import urllib.request
+                    with urllib.request.urlopen(
+                        AnnouncementBanner._FETCH_URL, timeout=8
+                    ) as resp:
+                        text = resp.read().decode("utf-8", errors="replace").strip()
+                    self_inner.result.emit(text)
+                except Exception:
+                    self_inner.result.emit("")   # silently hide on any error
+
+        self._fetcher = _Fetcher()
+        self._fetcher.result.connect(self._on_fetched)
+        self._fetcher.start()
+
+    def _on_fetched(self, text: str):
+        if not text:
+            return          # keep banner hidden
+        self._lbl.setText(text)
+        self._lbl.adjustSize()
+        needed = max(self._lbl.sizeHint().height() + 8, 28)
+        self.setFixedHeight(min(needed, 54))
+        self.update()
+
+    def _dismiss(self):
+        self.setFixedHeight(0)
+
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -2166,7 +2265,18 @@ class MainWindow(QWidget):
         from PyQt5.QtWidgets import QSplitter
         from PyQt5.QtCore import Qt as _Qt
 
-        root = QHBoxLayout(self)
+        # ── Announcement banner (async fetch from tubeo5866.github.io) ────────
+        self._announcement_banner = AnnouncementBanner(self)
+
+        # Outer vertical layout: banner on top, rest of UI below
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self._announcement_banner)
+
+        # Inner container holds the original horizontal splitter layout
+        inner_container = QWidget()
+        root = QHBoxLayout(inner_container)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
@@ -2443,12 +2553,12 @@ class MainWindow(QWidget):
         _sec("COMPRESSION")
         self.cmb_compress = QComboBox()
         self._compress_methods = [
-            "Lossless", "Pillow", "FFmpeg", "TinyPNG",
+            "None", "Lossless", "Pillow", "FFmpeg", "TinyPNG",
             "Kraken", "ImageKit", "Cloudinary",
             "Imagecompressr", "Compressor",
         ]
         self.cmb_compress.addItems(self._compress_methods)
-        self.cmb_compress.setCurrentText("Lossless")
+        self.cmb_compress.setCurrentText("None")
         _row("Method:", self.cmb_compress)
 
         self._api_stack = QStackedWidget()
@@ -2462,6 +2572,9 @@ class MainWindow(QWidget):
             for lb, wg in rows:
                 fl.addRow(lb, wg)
             return w
+
+        # Index 0 — None (no settings shown)
+        _nw = QWidget(); self._api_stack.addWidget(_nw)
 
         _lw = QWidget(); _ll = QLabel("No configuration needed.")
         _ll.setStyleSheet("color:grey;font-style:italic;")
@@ -2528,13 +2641,15 @@ class MainWindow(QWidget):
         def _on_method(text):
             idx = self._compress_methods.index(text) if text in self._compress_methods else 0
             self._api_stack.setCurrentIndex(idx)
-        self.cmb_compress.currentTextChanged.connect(_on_method)
-        _on_method(self.cmb_compress.currentText())
+            api_grp.setVisible(text != "None")
 
         api_grp = QGroupBox("Compression Settings")
         _ag = QVBoxLayout(api_grp); _ag.setContentsMargins(4, 4, 4, 4)
         _ag.addWidget(self._api_stack)
         g.addWidget(api_grp, r, 0, 1, 3); r += 1
+
+        self.cmb_compress.currentTextChanged.connect(_on_method)
+        _on_method(self.cmb_compress.currentText())
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(14)
@@ -2601,6 +2716,8 @@ class MainWindow(QWidget):
 
         splitter.addWidget(right_widget)
         splitter.setSizes([520, 360])
+        # Add the inner_container (splitter + all controls) below the banner
+        outer.addWidget(inner_container, stretch=1)
 
     def _open_format_dialog(self, target_field: "QLineEdit"):
         dlg = McFormatDialog(target_field, parent=self)
@@ -2869,7 +2986,7 @@ class MainWindow(QWidget):
         else:
             event.accept()
 
-LICENSE_TEXT = """
+LICENSE_TEXT = """\
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║            HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -3083,7 +3200,7 @@ def _check_license(app: "QApplication") -> bool:
 import argparse
 import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
+_CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
     ──────────────────────────────────────────────────────────────────────────
     Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
     URL, or a single image file, without opening the graphical interface.
@@ -3096,7 +3213,7 @@ _CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
     Run without any options to launch the full GUI instead.
 """)
 
-_CLI_EPILOG = textwrap.dedent("""    examples:
+_CLI_EPILOG = textwrap.dedent("""\    examples:
       # Interactive mode (recommended for first-time use)
       curl -fsSL https://hrz-maker.tubeo5866.com | python
 
