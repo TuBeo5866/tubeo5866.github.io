@@ -1,1 +1,1 @@
-There's a error when this script can't download video from YouTube (because of an error like "HTTPError 429: Too Many Requests"). We're manually investigating and will fix it as soon as possible.
+There's an error when this script can't download video from YouTube (because of an error like "HTTPError 429: Too Many Requests"). We're manually investigating and will fix it as soon as possible.
