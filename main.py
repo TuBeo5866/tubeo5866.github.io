@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 if {"-h", "--help"} & set(sys.argv[1:]):
     import argparse, textwrap
 
-    _HELP_DESC = textwrap.dedent("""\        Horizon UI Extension Studio — CLI
+    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
         ──────────────────────────────────────────────────────────────────────────
         Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
         URL, or a single image file, without opening the graphical interface.
@@ -17,7 +17,7 @@ if {"-h", "--help"} & set(sys.argv[1:]):
 
         Run without any options to launch the full GUI instead.
     """)
-    _HELP_EPILOG = textwrap.dedent("""\        examples:
+    _HELP_EPILOG = textwrap.dedent("""        examples:
           # Interactive mode (recommended for first-time use)
           curl -fsSL https://hrz-maker.tubeo5866.com | python
 
@@ -562,7 +562,13 @@ if not _IS_HELP:
         QCheckBox, QSlider, QRubberBand, QRadioButton, QButtonGroup,
     )
 
-WINDOW_TITLE        = "Horizon UI Extension Studio - Made by TuBeo5866 - ⚠⚠ BEDROCK ONLY! ⚠⚠"
+config = {}
+for line in urllib.request.urlopen("https://tubeo5866.github.io/config.txt").read().decode().splitlines():
+    if "=" in line:
+        k, v = line.split("=", 1)
+        config[k.strip()] = v.strip()
+
+WINDOW_TITLE        = f"HorizonUI Extension Studio (v{config['VERSION']}_{config['COMMIT']}) - Made by TuBeo5866 - ⚠⚠ BEDROCK ONLY! ⚠⚠"
 MAX_FRAMES          = 9999
 DEFAULT_FPS         = 20
 MEMORY_THRESHOLD    = 80
@@ -2662,6 +2668,10 @@ class MainWindow(QWidget):
 
         btn_bar = QHBoxLayout()
         btn_bar.setContentsMargins(4, 2, 4, 4)
+        self.btn_request_feature = QPushButton("✨  Request a Feature")
+        self.btn_request_feature.setToolTip("Request a new feature")
+        self.btn_request_feature.clicked.connect(lambda: __import__('webbrowser').open("https://forms.gle/KTJQCq8EdseQhFKp9"))
+
         self.btn_run = QPushButton("▶  Build mcpack")
         self.btn_run.clicked.connect(self.run_process)
 
@@ -2673,6 +2683,7 @@ class MainWindow(QWidget):
         self.btn_help.setToolTip("Show command-line interface help")
         self.btn_help.clicked.connect(self.show_cli_help)
 
+        btn_bar.addWidget(self.btn_request_feature, stretch=2)
         btn_bar.addWidget(self.btn_run, stretch=3)
         btn_bar.addWidget(self.btn_cancel, stretch=1)
         btn_bar.addWidget(self.btn_help, stretch=1)
@@ -2986,7 +2997,7 @@ class MainWindow(QWidget):
         else:
             event.accept()
 
-LICENSE_TEXT = """\
+LICENSE_TEXT = """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║            HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -3200,7 +3211,7 @@ def _check_license(app: "QApplication") -> bool:
 import argparse
 import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
+_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
     ──────────────────────────────────────────────────────────────────────────
     Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
     URL, or a single image file, without opening the graphical interface.
@@ -3213,7 +3224,7 @@ _CLI_DESCRIPTION = textwrap.dedent("""\    Horizon UI Extension Studio — CLI
     Run without any options to launch the full GUI instead.
 """)
 
-_CLI_EPILOG = textwrap.dedent("""\    examples:
+_CLI_EPILOG = textwrap.dedent("""    examples:
       # Interactive mode (recommended for first-time use)
       curl -fsSL https://hrz-maker.tubeo5866.com | python
 
