@@ -47,7 +47,7 @@ def _bootstrap_install():
             print(f"[PIP] Installing {pkg_name}...")
             try:
                 subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "--quiet", pkg_name],
+                    [sys.executable, "-m", "pip", "install", "--quiet", pkg_name, "--break-system-packages"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 print(f"[PIP] {pkg_name} ✓")
