@@ -2,114 +2,6 @@ import os, sys, json, shutil, subprocess, uuid, random, re, time, tempfile, zipf
 from pathlib import Path
 from abc import ABC, abstractmethod
 
-if {"-h", "--help"} & set(sys.argv[1:]):
-    import argparse, textwrap
-
-    _HELP_DESC = textwrap.dedent("""        Horizon UI Extension Studio — CLI
-        ──────────────────────────────────────────────────────────────────────────
-        Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
-        URL, or a single image file, without opening the graphical interface.
-
-        Sources supported:
-          • Video file (MP4, MOV, MKV, AVI, WEBM …)
-          • YouTube URL
-          • Image file (PNG, JPG, JPEG, WEBP, BMP, TGA) via --image
-
-        Run without any options to launch the full GUI instead.
-    """)
-    _HELP_EPILOG = textwrap.dedent("""        examples:
-          # Interactive mode (recommended for first-time use)
-          curl -fsSL https://hrz-maker.tubeo5866.com | python
-
-          # Non-interactive with a local video
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video myvideo.mp4 --name MyPack --creator Han
-
-          # YouTube URL with time range
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video "https://youtu.be/xxxx" --start 10 --end 40 --name BeachPack
-
-          # With custom BGM and compression
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --compress pillow --pillow-quality high
-
-          # With a loading-background folder
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
-
-          # With a custom pack icon and version
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --pack-icon icon.png --ext-version 202.1.0
-
-          # Static background
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode static
-
-          # Both (dynamic + static subpack)
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode both
-
-          # Image as background (PNG — used directly)
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --image background.png --name MyPack
-
-          # Image as background (non-PNG — auto-converted)
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --image wallpaper.jpg --name MyPack --bgm bgm.ogg
-
-          # Image with custom loading screens folder
-          curl -fsSL https://hrz-maker.tubeo5866.com | python --image bg.webp --name MyPack --loading-bg ./screens/
-    """)
-
-    _hp = argparse.ArgumentParser(
-        prog="curl -fsSL https://hrz-maker.tubeo5866.com | python",
-        description=_HELP_DESC,
-        epilog=_HELP_EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    _src = _hp.add_argument_group("source")
-    _src.add_argument("--video",       metavar="PATH_OR_URL", help="local video file or YouTube URL")
-    _src.add_argument("--image",       metavar="FILE",        help="use a single image (PNG/JPG/WEBP/BMP/TGA) as background instead of a video. Non-PNG images are auto-converted.")
-    _src.add_argument("--start",       metavar="TIME",        help="start time in seconds or mm:ss  (default: 0)  [video only]")
-    _src.add_argument("--end",         metavar="TIME",        help="end time in seconds or mm:ss  (default: 30)  [video only]")
-    _src.add_argument("--fps",         metavar="N",           help="frame extraction FPS  (default: 20)  [video only]")
-    _src.add_argument("--anim-frames", metavar="N",           help="number of animated background frames  (default: 100)  [video only]")
-    _src.add_argument("--load-frames", metavar="N",           help="number of loading background frames  (default: 100)  [video only]")
-    _out = _hp.add_argument_group("output")
-    _out.add_argument("--output",      "-o", metavar="DIR",   help="output directory  (default: ~/HorizonExtensions)")
-    _out.add_argument("--name",        "-n", metavar="NAME",  help="extension / pack name  (default: MyExtension)")
-    _out.add_argument("--creator",     "-c", metavar="NAME",  help="creator name embedded in manifest  (default: Unknown)")
-    _out.add_argument("--ext-version",       metavar="X.Y.Z", help="extension version X.Y.Z embedded in manifest.json  (default: 201.1.0)")
-    _out.add_argument("--pack-icon",         metavar="FILE",
-                      help="PNG file used as pack_icon.png in the root of the pack.\n"
-                           "• If the filename is already 'pack_icon' → copied as-is.\n"
-                           "• Any other name → resized to 256×256 automatically.\n"
-                           "  In GUI mode a crop & zoom dialog is shown instead.")
-    _out.add_argument("--bg-mode",           metavar="MODE",
-                      default="dynamic",
-                      help="background build mode: dynamic | static | both  (default: dynamic)\n"
-                           "  dynamic — extract N animated frames → hrzn_animated_background\n"
-                           "  static  — extract 1 frame only → hrzn_animated_background  [video only]\n"
-                           "  both    — dynamic main pack + ./subpacks/static/ with 1 frame  [video only]")
-    _ass = _hp.add_argument_group("assets")
-    _ass.add_argument("--bgm",        metavar="FILE", help="background music file (.ogg/.mp3/.wav/…). Omit to extract from video (skipped in image mode).")
-    _ass.add_argument("--bgm-name",   metavar="NAME", help="BGM track name used in sound_definitions.json  (default: bgm)")
-    _ass.add_argument("--loading-bg", metavar="DIR",  help="folder of images for loading screen. In image mode, background image is reused as loading frame if omitted.")
-    _cmp = _hp.add_argument_group("compression")
-    _cmp.add_argument("--compress",          metavar="METHOD",
-                      help="compression method: lossless | pillow | ffmpeg | tinypng | kraken | imagekit | cloudinary | compressor  (default: lossless)")
-    _cmp.add_argument("--pillow-quality",    metavar="LEVEL",  help="{low,medium,high,maximum}")
-    _cmp.add_argument("--ffmpeg-qv",         metavar="N",      help="ffmpeg -q:v value 1-31  (default: 1 = best)")
-    _cmp.add_argument("--tinypng-key",       metavar="KEY",    help="TinyPNG API key")
-    _cmp.add_argument("--kraken-key",        metavar="KEY",    help="Kraken.io API key")
-    _cmp.add_argument("--kraken-secret",     metavar="SECRET", help="Kraken.io API secret")
-    _cmp.add_argument("--kraken-quality",    metavar="N",      help="Kraken.io quality 1-100  (default: 90)")
-    _cmp.add_argument("--imagekit-key",      metavar="KEY",    help="ImageKit public key")
-    _cmp.add_argument("--imagekit-secret",   metavar="SECRET", help="ImageKit private key")
-    _cmp.add_argument("--imagekit-endpoint", metavar="URL",    help="ImageKit URL endpoint")
-    _cmp.add_argument("--imagekit-quality",  metavar="N",      help="ImageKit quality 1-100  (default: 90)")
-    _cmp.add_argument("--cloudinary-name",   metavar="NAME",   help="Cloudinary cloud name")
-    _cmp.add_argument("--cloudinary-key",    metavar="KEY",    help="Cloudinary API key")
-    _cmp.add_argument("--cloudinary-secret", metavar="SECRET", help="Cloudinary API secret")
-    _cmp.add_argument("--cloudinary-quality",metavar="LEVEL",
-                      help="{auto,auto:best,auto:good,auto:eco,auto:low}  (default: auto:best)")
-    _meta = _hp.add_argument_group("other")
-    _meta.add_argument("-i", "--interactive",   action="store_true", help="force interactive prompt mode")
-    _meta.add_argument("-q", "--quiet",         action="store_true", help="suppress detailed log output")
-    _meta.add_argument("--skip-bootstrap",      action="store_true", help="skip automatic tool/package installation check")
-    _hp.parse_args()
-    sys.exit(0)
 
 def _ffmpeg_in_path(name: str) -> bool:
     try:
@@ -130,376 +22,11 @@ def _add_to_path(directory: str):
     if d not in os.environ.get("PATH", ""):
         os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
 
-def _install_ffmpeg_windows() -> bool:
-    print("[ffmpeg] Trying winget...")
-    try:
-        r = subprocess.run(
-            ["winget", "install", "--id", "Gyan.FFmpeg", "-e", "--silent",
-             "--accept-package-agreements", "--accept-source-agreements"],
-            timeout=300, capture_output=True
-        )
-        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via winget ✓"); return True
-    except Exception: pass
-
-    print("[ffmpeg] Trying scoop...")
-    try:
-        r = subprocess.run(["scoop", "install", "ffmpeg"], timeout=300, capture_output=True)
-        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via scoop ✓"); return True
-    except Exception: pass
-
-    print("[ffmpeg] Trying choco...")
-    try:
-        r = subprocess.run(["choco", "install", "ffmpeg", "-y"], timeout=300, capture_output=True)
-        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via choco ✓"); return True
-    except Exception: pass
-
-    print("[ffmpeg] Downloading from GitHub (BtbN release)...")
-    try:
-        import urllib.request, zipfile as zf
-        api_url = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
-        with urllib.request.urlopen(api_url, timeout=30) as resp:
-            data = json.loads(resp.read())
-        asset_url = next(
-            a["browser_download_url"] for a in data["assets"]
-            if "win64" in a["name"] and "gpl" in a["name"] and a["name"].endswith(".zip")
-               and "shared" not in a["name"]
-        )
-        tmp_dir  = Path(tempfile.mkdtemp())
-        zip_path = tmp_dir / "ffmpeg.zip"
-        print(f"[ffmpeg] Downloading {asset_url} ...")
-        urllib.request.urlretrieve(asset_url, zip_path)
-
-        with zf.ZipFile(zip_path) as z:
-            z.extractall(tmp_dir)
-
-        ffmpeg_exe = next(tmp_dir.rglob("ffmpeg.exe"), None)
-        if ffmpeg_exe:
-
-            install_dir = Path(os.environ.get("APPDATA", Path.home())) / "ffmpeg"
-            install_dir.mkdir(parents=True, exist_ok=True)
-
-            bin_dir = ffmpeg_exe.parent
-            for exe in ("ffmpeg.exe", "ffprobe.exe", "ffplay.exe"):
-                src = bin_dir / exe
-                if not src.exists():
-                    src = next(tmp_dir.rglob(exe), None)
-                if src:
-                    shutil.copy2(src, install_dir / exe)
-            _add_to_path(str(install_dir))
-
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                    r"Environment", 0, winreg.KEY_ALL_ACCESS) as key:
-                    cur, _ = winreg.QueryValueEx(key, "PATH")
-                    if str(install_dir) not in cur:
-                        winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ,
-                                          cur + ";" + str(install_dir))
-            except Exception: pass
-
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            if _ffmpeg_in_path("ffmpeg"):
-                print("[ffmpeg] Installed via direct download ✓"); return True
-
-            direct_exe = install_dir / "ffmpeg.exe"
-            if direct_exe.exists():
-                print(f"[ffmpeg] Installed to {install_dir} (absolute path fallback) ✓")
-                return True
-    except Exception as e:
-        print(f"[ffmpeg] Direct download failed: {e}")
-
-    return False
-
-def _get_ffmpeg_exe() -> str:
-    if _ffmpeg_in_path("ffmpeg"):
-        return "ffmpeg"
-    appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg" / "ffmpeg.exe"
-    if appdata_ffmpeg.exists():
-        return str(appdata_ffmpeg)
-    return "ffmpeg"
-
-def _install_ytdlp_windows() -> bool:
-    print("[yt-dlp] Trying pip...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        if _ytdlp_in_path("yt-dlp"):
-            print("[yt-dlp] Installed via pip ✓"); return True
-        scripts = Path(sys.executable).parent / "Scripts"
-        if (scripts / "yt-dlp.exe").exists():
-            _add_to_path(str(scripts))
-            print("[yt-dlp] Installed via pip (Scripts added to PATH) ✓"); return True
-    except Exception: pass
-
-    print("[yt-dlp] Trying winget...")
-    try:
-        r = subprocess.run(
-            ["winget", "install", "--id", "yt-dlp.yt-dlp", "-e", "--silent",
-             "--accept-package-agreements", "--accept-source-agreements"],
-            timeout=120, capture_output=True
-        )
-        if r.returncode == 0 and _ytdlp_in_path("yt-dlp"):
-            print("[yt-dlp] Installed via winget ✓"); return True
-    except Exception: pass
-
-    print("[yt-dlp] Trying scoop...")
-    try:
-        r = subprocess.run(["scoop", "install", "yt-dlp"], timeout=120, capture_output=True)
-        if r.returncode == 0 and _ytdlp_in_path("yt-dlp"):
-            print("[yt-dlp] Installed via scoop ✓"); return True
-    except Exception: pass
-
-    print("[yt-dlp] Downloading .exe from GitHub...")
-    try:
-        exe_url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
-        install_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ytdlp_bin"
-        install_dir.mkdir(parents=True, exist_ok=True)
-        exe_path = install_dir / "yt-dlp.exe"
-        urllib.request.urlretrieve(exe_url, exe_path)
-        _add_to_path(str(install_dir))
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                r"Environment", 0, winreg.KEY_ALL_ACCESS) as key:
-                cur, _ = winreg.QueryValueEx(key, "PATH")
-                if str(install_dir) not in cur:
-                    winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ,
-                                      cur + ";" + str(install_dir))
-        except Exception: pass
-        if _ytdlp_in_path("yt-dlp"):
-            print("[yt-dlp] Installed via direct download ✓"); return True
-    except Exception as e:
-        print(f"[yt-dlp] Direct download failed: {e}")
-
-    return False
-
-def _install_ffmpeg_macos() -> bool:
-    print("[ffmpeg] Trying brew...")
-    try:
-        for bp in ["/opt/homebrew/bin", "/usr/local/bin"]:
-            _add_to_path(bp)
-        r = subprocess.run(["brew", "install", "ffmpeg"], timeout=600, capture_output=True)
-        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via brew ✓"); return True
-    except Exception: pass
-
-    print("[ffmpeg] Trying port (MacPorts)...")
-    try:
-        r = subprocess.run(["port", "install", "ffmpeg"], timeout=600, capture_output=True)
-        if r.returncode == 0 and _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via MacPorts ✓"); return True
-    except Exception: pass
-
-    print("[ffmpeg] Downloading static build from evermeet.cx...")
-    try:
-        url = "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"
-        tmp = Path(tempfile.mkdtemp())
-        zip_path = tmp / "ffmpeg.zip"
-        urllib.request.urlretrieve(url, zip_path)
-        with zipfile.ZipFile(zip_path) as z:
-            z.extractall(tmp)
-        install_dir = Path.home() / ".local" / "bin"
-        install_dir.mkdir(parents=True, exist_ok=True)
-        ff = tmp / "ffmpeg"
-        if ff.exists():
-            dst = install_dir / "ffmpeg"
-            shutil.copy2(ff, dst)
-            dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-            _add_to_path(str(install_dir))
-            if _ffmpeg_in_path("ffmpeg"):
-                print("[ffmpeg] Installed via static download ✓"); return True
-    except Exception as e:
-        print(f"[ffmpeg] Static download failed: {e}")
-
-    return False
-
-def _install_ytdlp_macos() -> bool:
-    print("[yt-dlp] Trying pip...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        _add_to_path(str(Path.home() / ".local" / "bin"))
-        _add_to_path("/opt/homebrew/bin")
-        if _ytdlp_in_path("ffmpeg"):
-            print("[yt-dlp] Installed via pip ✓"); return True
-    except Exception: pass
-
-    print("[yt-dlp] Trying brew...")
-    try:
-        r = subprocess.run(["brew", "install", "yt-dlp"], timeout=180, capture_output=True)
-        if r.returncode == 0 and _ytdlp_in_path("ffmpeg"):
-            print("[yt-dlp] Installed via brew ✓"); return True
-    except Exception: pass
-
-    print("[yt-dlp] Downloading binary from GitHub...")
-    try:
-        url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
-        install_dir = Path.home() / ".local" / "bin"
-        install_dir.mkdir(parents=True, exist_ok=True)
-        dst = install_dir / "yt-dlp"
-        urllib.request.urlretrieve(url, dst)
-        dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        _add_to_path(str(install_dir))
-        if _ytdlp_in_path("ffmpeg"):
-            print("[yt-dlp] Installed via binary download ✓"); return True
-    except Exception as e:
-        print(f"[yt-dlp] Binary download failed: {e}")
-
-    return False
-
-def _install_ffmpeg_linux() -> bool:
-    for pm in [["apt-get", "install", "-y", "ffmpeg"],
-               ["apt",     "install", "-y", "ffmpeg"]]:
-        print(f"[ffmpeg] Trying {pm[0]}...")
-        try:
-            subprocess.run(["sudo"] + pm, timeout=300, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _ffmpeg_in_path("ffmpeg"):
-                print(f"[ffmpeg] Installed via {pm[0]} ✓"); return True
-        except Exception: pass
-
-    for pm in [["dnf",    "install", "-y", "ffmpeg"],
-               ["yum",    "install", "-y", "ffmpeg"],
-               ["pacman", "-S",  "--noconfirm", "ffmpeg"],
-               ["zypper", "install", "-y", "ffmpeg"],
-               ["apk",    "add", "ffmpeg"]]:
-        print(f"[ffmpeg] Trying {pm[0]}...")
-        try:
-            subprocess.run(["sudo"] + pm, timeout=300, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _ffmpeg_in_path("ffmpeg"):
-                print(f"[ffmpeg] Installed via {pm[0]} ✓"); return True
-        except Exception: pass
-
-    print("[ffmpeg] Trying snap...")
-    try:
-        subprocess.run(["sudo", "snap", "install", "ffmpeg"],
-                       timeout=300, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via snap ✓"); return True
-    except Exception: pass
-
-    print("[ffmpeg] Downloading static build (John Van Sickle)...")
-    try:
-        import platform
-        arch = "amd64" if platform.machine() in ("x86_64", "AMD64") else "arm64"
-        url  = f"https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-{arch}-static.tar.xz"
-        tmp  = Path(tempfile.mkdtemp())
-        tar  = tmp / "ffmpeg.tar.xz"
-        urllib.request.urlretrieve(url, tar)
-        subprocess.run(["tar", "-xf", str(tar), "-C", str(tmp)],
-                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        install_dir = Path.home() / ".local" / "bin"
-        install_dir.mkdir(parents=True, exist_ok=True)
-        for exe in ("ffmpeg", "ffprobe"):
-            found = next(tmp.rglob(exe), None)
-            if found:
-                dst = install_dir / exe
-                shutil.copy2(found, dst)
-                dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        _add_to_path(str(install_dir))
-        shutil.rmtree(tmp, ignore_errors=True)
-        if _ffmpeg_in_path("ffmpeg"):
-            print("[ffmpeg] Installed via static build ✓"); return True
-    except Exception as e:
-        print(f"[ffmpeg] Static build failed: {e}")
-
-    return False
-
-def _install_ytdlp_linux() -> bool:
-    print("[yt-dlp] Trying pip...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        _add_to_path(str(Path.home() / ".local" / "bin"))
-        if _ytdlp_in_path("ffmpeg"):
-            print("[yt-dlp] Installed via pip ✓"); return True
-    except Exception: pass
-
-    for pm in [["apt-get", "install", "-y", "yt-dlp"],
-               ["apt",     "install", "-y", "yt-dlp"],
-               ["dnf",     "install", "-y", "yt-dlp"],
-               ["pacman",  "-S", "--noconfirm", "yt-dlp"],
-               ["apk",     "add", "yt-dlp"]]:
-        print(f"[yt-dlp] Trying {pm[0]}...")
-        try:
-            subprocess.run(["sudo"] + pm, timeout=120, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _ytdlp_in_path("ffmpeg"):
-                print(f"[yt-dlp] Installed via {pm[0]} ✓"); return True
-        except Exception: pass
-
-    print("[yt-dlp] Downloading binary from GitHub...")
-    try:
-        url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
-        install_dir = Path.home() / ".local" / "bin"
-        install_dir.mkdir(parents=True, exist_ok=True)
-        dst = install_dir / "yt-dlp"
-        urllib.request.urlretrieve(url, dst)
-        dst.chmod(dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        _add_to_path(str(install_dir))
-        if _ytdlp_in_path("ffmpeg"):
-            print("[yt-dlp] Installed via binary download ✓"); return True
-    except Exception as e:
-        print(f"[yt-dlp] Binary download failed: {e}")
-
-    return False
-
-def _ensure_tool(name: str) -> bool:
-    if _ffmpeg_in_path(name):
-        return True
-
-    if _ytdlp_in_path(name):
-        return True
-
-    print(f"\n[INSTALL] {name} not found – attempting automatic installation...")
-
-    is_win   = sys.platform.startswith("win")
-    is_mac   = sys.platform.startswith("darwin")
-
-    if name == "ffmpeg":
-        if   is_win: ok = _install_ffmpeg_windows()
-        elif is_mac: ok = _install_ffmpeg_macos()
-        else:        ok = _install_ffmpeg_linux()
-    elif name == "yt-dlp":
-        if   is_win: ok = _install_ytdlp_windows()
-        elif is_mac: ok = _install_ytdlp_macos()
-        else:        ok = _install_ytdlp_linux()
-    else:
-        ok = False
-
-    if ok:
-        print(f"[INSTALL] {name} ready ✓")
-    else:
-        print(f"[ERROR] Could not install {name} automatically.")
-        print(f"        Please install manually:")
-        if sys.platform.startswith("win"):
-            urls = {"ffmpeg": "https://ffmpeg.org/download.html",
-                    "yt-dlp": "https://github.com/yt-dlp/yt-dlp/releases"}
-        elif sys.platform.startswith("darwin"):
-            urls = {"ffmpeg": "https://ffmpeg.org/download.html",
-                    "yt-dlp": "https://github.com/yt-dlp/yt-dlp/releases"}
-        else:
-            urls = {"ffmpeg": "https://ffmpeg.org/download.html",
-                    "yt-dlp": "https://github.com/yt-dlp/yt-dlp/releases"}
-        print(f"        → {urls.get(name, 'https://github.com/yt-dlp/yt-dlp')}")
-    return ok
-
 def _bootstrap_install():
     print("────────────────────────────────────────────────────────")
     pip_pkgs = [
         ("PyQt5",    "PyQt5"),
-        ("PIL",   "Pillow"),
+        ("PIL",      "Pillow"),
         ("psutil",   "psutil"),
         ("requests", "requests"),
         ("tqdm",     "tqdm"),
@@ -535,32 +62,38 @@ def _bootstrap_install():
     for imp, pkg in optional_pkgs:
         pip_install(imp, pkg)
 
-    print("[BOOTSTRAP] ── System tools ──────────────────────")
-    _ensure_tool("ffmpeg")
-    _ensure_tool("yt-dlp")
     print("[BOOTSTRAP] ── Done ──────────────────────────────")
 
-_IS_HELP      = bool({"-h", "--help"}     & set(sys.argv[1:]))
-_IS_SKIP_BOOT = bool({"--skip-bootstrap"} & set(sys.argv[1:]))
+_IS_DEBUG = bool({"--debug"} & set(sys.argv[1:]))
+_bootstrap_install()
 
-if not _IS_HELP and not _IS_SKIP_BOOT:
-    _bootstrap_install()
 
-if not _IS_HELP:
-    import requests
-    import psutil
-    from PIL import Image, ImageFilter
-    from PyQt5 import QtCore, QtGui
-    from PyQt5.QtCore import Qt, QSize, QTimer, QRectF
-    from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette, QPainter, QPainterPath
-    from PyQt5.QtWidgets import (
-        QApplication, QWidget, QDialog, QGridLayout, QFormLayout, QLabel,
-        QLineEdit, QPushButton, QFileDialog, QComboBox, QSpinBox,
-        QDoubleSpinBox, QTextEdit, QMessageBox, QProgressBar, QGroupBox,
-        QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QFrame,
-        QStackedWidget, QListWidget, QListWidgetItem, QAbstractItemView,
-        QCheckBox, QSlider, QRubberBand, QRadioButton, QButtonGroup,
-    )
+def _get_ffmpeg_exe() -> str:
+    """Return the ffmpeg executable path."""
+    try:
+        subprocess.check_output(["ffmpeg", "-version"], stderr=subprocess.DEVNULL)
+        return "ffmpeg"
+    except Exception:
+        pass
+    appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg" / "ffmpeg.exe"
+    if appdata_ffmpeg.exists():
+        return str(appdata_ffmpeg)
+    return "ffmpeg"
+
+import requests
+import psutil
+from PIL import Image, ImageFilter
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import Qt, QSize, QTimer, QRectF
+from PyQt5.QtGui import QIcon, QPixmap, QFont, QColor, QPalette, QPainter, QPainterPath
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QDialog, QGridLayout, QFormLayout, QLabel,
+    QLineEdit, QPushButton, QFileDialog, QComboBox, QSpinBox,
+    QDoubleSpinBox, QTextEdit, QMessageBox, QProgressBar, QGroupBox,
+    QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QFrame,
+    QStackedWidget, QListWidget, QListWidgetItem, QAbstractItemView,
+    QCheckBox, QSlider, QRubberBand, QRadioButton, QButtonGroup,
+)
 
 config = {}
 for line in urllib.request.urlopen("https://tubeo5866.github.io/config.txt").read().decode().splitlines():
@@ -568,7 +101,7 @@ for line in urllib.request.urlopen("https://tubeo5866.github.io/config.txt").rea
         k, v = line.split("=", 1)
         config[k.strip()] = v.strip()
 
-WINDOW_TITLE        = f"HorizonUI Extension Studio (v{config['VERSION']}_{config['COMMIT']}) - Made by TuBeo5866 - ⚠⚠ BEDROCK ONLY! ⚠⚠"
+WINDOW_TITLE        = f"TuBeo5866's HorizonUI/NekoUI Extension Studio (v{config['VERSION']}_{config['COMMIT']})"
 MAX_FRAMES          = 9999
 DEFAULT_FPS         = 20
 MEMORY_THRESHOLD    = 80
@@ -769,6 +302,233 @@ class PackIconCropDialog(QDialog):
     def get_result(self) -> Image.Image:
         """Returns the cropped 256×256 PIL Image, or None if cancelled."""
         return self._result_pil
+
+
+# ── Container Background slot definitions ────────────────────────────────────
+CONTAINER_BG_SLOTS = [
+    ("Anvil",              "anvil_screen.png"),
+    ("Beacon",             "beacon_screen.png"),
+    ("Brewing",            "brewing_screen.png"),
+    ("Cartography",        "cartography_screen.png"),
+    ("Chest",              "chest_background.png"),
+    ("Enchanting",         "enchanting_screen.png"),
+    ("Furnace",            "furnace_background.png"),
+    ("Grindstone",         "grindstone_screen.png"),
+    ("Horse Inventory",    "horse_screen.png"),
+    ("Player Inventory",   "inventory_background.png"),
+    ("Loom",               "loom_screen.png"),
+    ("Redstone Commons",   "redstone_screen_common.png"),
+    ("Smithing",           "smithing_table.png"),
+    ("Stone Cutter",       "stone_cutter_screen.png"),
+]
+
+
+class ContainerBgDialog(QDialog):
+    """
+    Dialog for customising individual container background images.
+
+    Left panel  – one row per slot (label + path field + Browse button).
+    Right panel – live preview of the currently focused slot.
+
+    Each slot may have a custom PIL Image (after crop) or a raw path,
+    or be left empty (use the ZIP defaults).
+    """
+
+    _PREVIEW_W = 280
+    _PREVIEW_H = 280
+
+    def __init__(self, slot_data: dict, parent=None):
+        """
+        slot_data: dict mapping filename → {"pil": PIL.Image|None, "path": str}
+                   Mutated in-place on Accept.
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Custom Container Backgrounds")
+        self.setMinimumSize(780, 560)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self._slot_data   = slot_data          # filename → {"pil", "path"}
+        self._focused_key = None
+        self._build()
+
+    # ── UI ────────────────────────────────────────────────────────────────────
+    def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(8)
+
+        hint = QLabel("Optional — leave any field empty to use the default from the downloaded ZIP.")
+        hint.setStyleSheet("color:#888; font-size:10px;")
+        outer.addWidget(hint)
+
+        splitter_w = QWidget()
+        split_h = QHBoxLayout(splitter_w)
+        split_h.setContentsMargins(0, 0, 0, 0)
+        split_h.setSpacing(10)
+
+        # ── Left: slot rows ───────────────────────────────────────────────────
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_inner = QWidget()
+        grid = QGridLayout(left_inner)
+        grid.setSpacing(5)
+        grid.setContentsMargins(4, 4, 4, 4)
+        grid.setColumnStretch(1, 1)
+
+        self._fields  = {}   # filename → QLineEdit
+        self._previews = {}  # filename → PIL image (after crop) or None
+
+        for row_idx, (label, fname) in enumerate(CONTAINER_BG_SLOTS):
+            lbl = QLabel(f"{label}:")
+            lbl.setFixedWidth(120)
+
+            field = QLineEdit()
+            field.setReadOnly(True)
+            field.setPlaceholderText("(default)")
+            # Restore previous value if any
+            saved = self._slot_data.get(fname, {})
+            if saved.get("path"):
+                field.setText(saved["path"])
+            self._fields[fname] = field
+
+            # Focus → update preview
+            field.mousePressEvent = lambda ev, f=fname: self._set_focus(f)
+
+            # Clear button
+            btn_clear = QPushButton("✖")
+            btn_clear.setFixedWidth(26)
+            btn_clear.setToolTip("Clear")
+            btn_clear.clicked.connect(lambda _, f=fname: self._clear_slot(f))
+
+            btn = QPushButton("Browse…")
+            btn.setFixedWidth(72)
+            btn.clicked.connect(lambda _, f=fname: self._browse_slot(f))
+
+            # Thumbnail
+            thumb = QLabel()
+            thumb.setFixedSize(28, 28)
+            thumb.setStyleSheet("border:1px solid #555; border-radius:2px; background:#1a1a1a;")
+            thumb.setAlignment(Qt.AlignCenter)
+            self._previews[fname] = {"thumb": thumb, "pil": saved.get("pil")}
+            if saved.get("pil"):
+                self._update_thumb(fname, saved["pil"])
+
+            grid.addWidget(lbl,       row_idx, 0)
+            grid.addWidget(field,     row_idx, 1)
+            grid.addWidget(thumb,     row_idx, 2)
+            grid.addWidget(btn_clear, row_idx, 3)
+            grid.addWidget(btn,       row_idx, 4)
+
+        left_scroll.setWidget(left_inner)
+        split_h.addWidget(left_scroll, stretch=1)
+
+        # ── Right: preview ────────────────────────────────────────────────────
+        right_w = QWidget()
+        right_w.setFixedWidth(self._PREVIEW_W + 16)
+        right_vbox = QVBoxLayout(right_w)
+        right_vbox.setContentsMargins(0, 0, 0, 0)
+        right_vbox.setSpacing(6)
+
+        self._preview_lbl_title = QLabel("Preview")
+        self._preview_lbl_title.setStyleSheet("font-weight:bold; font-size:11px;")
+        self._preview_lbl_title.setAlignment(Qt.AlignCenter)
+        right_vbox.addWidget(self._preview_lbl_title)
+
+        self._preview_canvas = QLabel()
+        self._preview_canvas.setFixedSize(self._PREVIEW_W, self._PREVIEW_H)
+        self._preview_canvas.setStyleSheet(
+            "border:2px solid #555; border-radius:4px; background:#111;"
+        )
+        self._preview_canvas.setAlignment(Qt.AlignCenter)
+        right_vbox.addWidget(self._preview_canvas)
+        right_vbox.addStretch()
+
+        split_h.addWidget(right_w)
+        outer.addWidget(splitter_w, stretch=1)
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        outer.addWidget(sep)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton("Cancel")
+        btn_ok     = QPushButton("Apply")
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok.clicked.connect(self._apply)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addSpacing(6)
+        btn_row.addWidget(btn_ok)
+        outer.addLayout(btn_row)
+
+    # ── Slot actions ──────────────────────────────────────────────────────────
+    def _set_focus(self, fname: str):
+        self._focused_key = fname
+        pil = self._previews[fname]["pil"]
+        slot_label = next((l for l, f in CONTAINER_BG_SLOTS if f == fname), fname)
+        self._preview_lbl_title.setText(slot_label)
+        if pil:
+            self._show_preview(pil)
+        else:
+            self._preview_canvas.clear()
+            self._preview_canvas.setText("No image selected")
+
+    def _show_preview(self, pil_img: "Image.Image"):
+        thumb = pil_img.convert("RGBA").copy()
+        thumb.thumbnail((self._PREVIEW_W, self._PREVIEW_H), Image.LANCZOS)
+        data = thumb.tobytes("raw", "RGBA")
+        qimg = QtGui.QImage(data, thumb.width, thumb.height, QtGui.QImage.Format_RGBA8888)
+        self._preview_canvas.setPixmap(
+            QPixmap.fromImage(qimg).scaled(
+                self._PREVIEW_W, self._PREVIEW_H,
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        )
+
+    def _update_thumb(self, fname: str, pil_img: "Image.Image"):
+        t = pil_img.convert("RGBA").copy()
+        t.thumbnail((26, 26), Image.LANCZOS)
+        data = t.tobytes("raw", "RGBA")
+        qimg = QtGui.QImage(data, t.width, t.height, QtGui.QImage.Format_RGBA8888)
+        self._previews[fname]["thumb"].setPixmap(QPixmap.fromImage(qimg))
+
+    def _browse_slot(self, fname: str):
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"Select image for {fname}",
+            filter="Images (*.png *.jpg *.jpeg *.webp *.bmp *.tga);;All Files (*)"
+        )
+        if not path:
+            return
+        self._set_focus(fname)
+        dlg = PackIconCropDialog(path, parent=self)
+        dlg.setWindowTitle(f"Crop — {fname}")
+        if dlg.exec_() == QDialog.Accepted:
+            result = dlg.get_result()
+            if result:
+                self._previews[fname]["pil"] = result
+                self._fields[fname].setText(path)
+                self._update_thumb(fname, result)
+                self._show_preview(result)
+
+    def _clear_slot(self, fname: str):
+        self._previews[fname]["pil"] = None
+        self._fields[fname].clear()
+        self._previews[fname]["thumb"].clear()
+        if self._focused_key == fname:
+            self._preview_canvas.clear()
+            self._preview_canvas.setText("No image selected")
+
+    # ── Accept ────────────────────────────────────────────────────────────────
+    def _apply(self):
+        for fname in self._fields:
+            self._slot_data[fname] = {
+                "pil":  self._previews[fname]["pil"],
+                "path": self._fields[fname].text(),
+            }
+        self.accept()
+
+    def count_filled(self) -> int:
+        return sum(1 for fname in self._fields if self._previews[fname]["pil"] is not None)
+
 
 class Compressor(ABC):
     def __init__(self, cfg, log_func):
@@ -1320,11 +1080,16 @@ class Worker(QtCore.QThread):
 
     def log(self, msg: str):
         self.log_signal.emit(str(msg))
+        if _IS_DEBUG:
+            print(f"[DEBUG] {msg}", flush=True)
+
+    def _success_message(self) -> str:
+        return "✅ .mcpack created successfully!"
 
     def run(self):
         try:
             ok = self.process()
-            self.done_signal.emit(True, "✅ mcpack created successfully!")
+            self.done_signal.emit(True, self._success_message())
         except Exception as e:
             import traceback
             self.log(traceback.format_exc())
@@ -1370,22 +1135,36 @@ class Worker(QtCore.QThread):
             self.log(f"⚠️ High memory: {mem.percent:.0f}%")
 
     def _get_ytdlp_cookie_args(self) -> list:
-        """Try each installed browser in order; return --cookies-from-browser args for the first one found."""
-        browsers = ["chrome", "firefox", "edge", "brave", "opera", "chromium", "vivaldi", "safari"]
-        for browser in browsers:
-            try:
-                r = subprocess.run(
-                    ["yt-dlp", "--cookies-from-browser", browser, "--simulate",
-                     "--quiet", "--no-warnings", "https://www.youtube.com/"],
-                    capture_output=True, timeout=15
-                )
-                if r.returncode == 0:
-                    self.log(f"Using cookies from {browser}")
-                    return ["--cookies-from-browser", browser]
-            except Exception:
-                continue
-        self.log("⚠️ No browser cookies found, attempting download without cookies")
-        return []
+        """
+        Use the browser specified in cfg to export cookies to a temp cookies.txt,
+        then return --cookies <path> args for yt-dlp.
+        Falls back to auto-detection if no browser is specified.
+        """
+        browser = self.cfg.get("yt_cookies_browser", "").strip().lower()
+        if not browser:
+            self.log("⚠️ No cookies browser specified, attempting without cookies")
+            return []
+
+        cookies_txt = Path(tempfile.mkdtemp()) / "cookies.txt"
+        self._temp_files.append(cookies_txt.parent)
+        self.log(f"Exporting cookies from {browser} → {cookies_txt}")
+        try:
+            r = subprocess.run(
+                ["yt-dlp", "--cookies-from-browser", browser,
+                 "--cookies", str(cookies_txt),
+                 "--simulate", "--quiet", "--no-warnings",
+                 "https://www.youtube.com/"],
+                capture_output=True, timeout=30
+            )
+            if cookies_txt.exists() and cookies_txt.stat().st_size > 0:
+                self.log(f"Cookies exported ✓ ({cookies_txt.stat().st_size} bytes)")
+                return ["--cookies", str(cookies_txt)]
+            else:
+                self.log(f"⚠️ Cookie export returned code {r.returncode}, trying --cookies-from-browser directly")
+                return ["--cookies-from-browser", browser]
+        except Exception as e:
+            self.log(f"⚠️ Cookie export failed: {e}, trying --cookies-from-browser directly")
+            return ["--cookies-from-browser", browser]
 
     def _download_youtube(self, url: str, output_dir: Path) -> Path:
         if self._stop_requested: raise RuntimeError("Cancelled.")
@@ -1428,6 +1207,30 @@ class Worker(QtCore.QThread):
             self.log(f"Container background extracted → {dst}")
         except Exception as e:
             self.log(f"⚠️ Failed to download container background: {e}")
+        # Apply custom container background images (overwrite ZIP defaults)
+        self._apply_custom_container_bg(dst)
+
+    def _apply_custom_container_bg(self, dst_dir: Path):
+        """Overwrite ZIP-extracted images with any user-supplied custom PIL images."""
+        images = self.cfg.get("container_bg_images", {})
+        if not images:
+            return
+        count = 0
+        for fname, slot in images.items():
+            if not slot:
+                continue
+            pil_img = slot.get("pil") if isinstance(slot, dict) else slot
+            if pil_img is None:
+                continue
+            out = dst_dir / fname
+            try:
+                pil_img.save(str(out), "PNG")
+                self.log(f"Custom container bg applied: {fname}")
+                count += 1
+            except Exception as e:
+                self.log(f"⚠️ Failed to save custom container bg {fname}: {e}")
+        if count:
+            self.log(f"✓ {count} custom container background(s) applied")
 
     def _extract_frames_anim(self, video: Path, pack_root: Path) -> Path:
         if self._stop_requested: raise RuntimeError("Cancelled.")
@@ -1450,6 +1253,13 @@ class Worker(QtCore.QThread):
         args += ["-i", str(video), "-vf", f"fps={fps}", "-frames:v", str(n), str(out_pattern)]
         self._run_ffmpeg(args)
         return dst
+
+    def _gen_black_loading_frame(self, load_dir: Path):
+        """Generate a single black 1×1 PNG as the loading background."""
+        self._ensure_dir(load_dir)
+        black = Image.new("RGB", (1, 1), (0, 0, 0))
+        black.save(str(load_dir / "1.png"), "PNG")
+        self.log("Loading background: black frame generated ✓")
 
     def _extract_frames_loading(self, video: Path, pack_root: Path) -> Path:
         if self._stop_requested: raise RuntimeError("Cancelled.")
@@ -1658,6 +1468,9 @@ class Worker(QtCore.QThread):
         out_path.write_text(content, encoding="utf-8")
         self.log(f".hrzn_public_bg_load.json generated ({n} frames)")
 
+    def _pack_display_name(self, ext_name: str) -> str:
+        return f"§l§dHorizon§bUI: {ext_name}"
+
     def _gen_manifest(self, pack_root: Path):
         creator  = self.cfg.get("creator", "Unknown")
         ext_name = self.cfg.get("new_pack_name", "MyExtension")
@@ -1677,7 +1490,7 @@ class Worker(QtCore.QThread):
             "format_version": 2,
             "header": {
                 "description": desc,
-                "name": f"§l§dHorizon§bUI: {ext_name}",
+                "name": self._pack_display_name(ext_name),
                 "uuid": str(uuid.uuid4()),
                 "version": version_tuple,
                 "min_engine_version": [1, 21, 114]
@@ -2079,6 +1892,10 @@ class Worker(QtCore.QThread):
                 self._copy_loading_bg_folder(pack_root)
                 load_dir = pack_root / LOADING_BG_DIR
                 tick("Loading background images copied from folder")
+            elif self.cfg.get("use_black_loading"):
+                load_dir = pack_root / LOADING_BG_DIR
+                self._gen_black_loading_frame(load_dir)
+                tick("Loading background: black frame")
             else:
                 load_dir = self._extract_frames_loading(video, pack_root)
                 tick("Loading background frames extracted")
@@ -2144,79 +1961,991 @@ class Worker(QtCore.QThread):
 # top bar spanning the full width of the main window.
 # ══════════════════════════════════════════════════════════════════════════════
 
+class NekoWorker(Worker):
+    """
+    Subclass of Worker that builds NekoUI-format mcpacks instead of HorizonUI.
+
+    Directory structure produced:
+        <pack_root>/
+        ├── .hans_common_files/
+        │   ├── hans_animated_background.json
+        │   └── hans_loading_background.json
+        ├── neko_ui_public_animated_background/
+        ├── neko_ui_public_container_background/
+        ├── neko_ui_public_loading_background/
+        ├── sounds/music/background music/  (bgm.ogg)
+        ├── subpacks/
+        │   ├── dynamic/
+        │   └── static/
+        │       ├── .hans_common_files/
+        │       └── neko_ui_public_animated_background/
+        ├── ui/
+        │   ├── _ui_defs.json
+        │   └── _global_variables.json
+        ├── sounds/sound_definitions.json
+        └── manifest.json
+    """
+
+    # NekoUI directory names
+    NEKO_ANIM_BG_DIR      = "neko_ui_public_animated_background"
+    NEKO_LOADING_BG_DIR   = "neko_ui_public_loading_background"
+    NEKO_CONTAINER_BG_DIR = "neko_ui_public_container_background"
+    NEKO_COMMON_DIR       = ".hans_common_files"
+    NEKO_SOUNDS_DIR       = "sounds/music/background music"
+
+    NEKO_CONTAINER_BG_URL = "https://tubeo5866.github.io/files/hrzn_container_background.zip"
+
+    def _pack_display_name(self, ext_name: str) -> str:
+        return f"§l§eNeko§bUI: {ext_name}"
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _neko_extract_frames_anim(self, video: Path, pack_root: Path) -> Path:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / self.NEKO_ANIM_BG_DIR
+        if dst.exists(): shutil.rmtree(dst)
+        self._ensure_dir(dst)
+        n = int(self.cfg.get("anim_frames", MAX_FRAMES))
+        out_pattern = dst / f"{FRAME_PREFIX_ANIM}%03d.png"
+        self.log(f"[NekoUI] Extracting {n} anim frames → {dst}")
+        args = ["-y"]
+        if not self.cfg.get("is_trimmed"):
+            ss = self.cfg.get("start_seconds")
+            en = self.cfg.get("end_seconds")
+            if ss is not None: args += ["-ss", str(ss)]
+            if en is not None and ss is not None: args += ["-t", str(en - ss)]
+        fps = self.cfg.get("fps", DEFAULT_FPS)
+        args += ["-i", str(video), "-vf", f"fps={fps}", "-frames:v", str(n), str(out_pattern)]
+        self._run_ffmpeg(args)
+        return dst
+
+    def _neko_extract_frames_loading(self, video: Path, pack_root: Path) -> Path:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / self.NEKO_LOADING_BG_DIR
+        if dst.exists(): shutil.rmtree(dst)
+        self._ensure_dir(dst)
+        n = int(self.cfg.get("load_frames", MAX_FRAMES))
+        tmp_pat = dst / "load_%03d.png"
+        fps = self.cfg.get("fps", DEFAULT_FPS)
+        args = ["-y"]
+        if not self.cfg.get("is_trimmed"):
+            ss = self.cfg.get("start_seconds")
+            en = self.cfg.get("end_seconds")
+            if ss is not None: args += ["-ss", str(ss)]
+            if en is not None and ss is not None: args += ["-t", str(en - ss)]
+        args += ["-i", str(video), "-vf", f"fps={fps}", "-frames:v", str(n), str(tmp_pat)]
+        self._run_ffmpeg(args)
+        for f in sorted(dst.glob("load_*.png")):
+            m = re.match(r"load_(\d+)\.png", f.name)
+            if m:
+                f.rename(dst / f"{int(m.group(1))}.png")
+        self.log(f"[NekoUI] Loading frames extracted → {dst}")
+        return dst
+
+    def _neko_extract_frame_static(self, video: Path, pack_root: Path) -> Path:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / self.NEKO_ANIM_BG_DIR
+        if dst.exists(): shutil.rmtree(dst)
+        self._ensure_dir(dst)
+        out_pattern = dst / f"{FRAME_PREFIX_ANIM}%03d.png"
+        self.log(f"[NekoUI] Static mode: extracting 1 frame → {dst}")
+        args = ["-y"]
+        if not self.cfg.get("is_trimmed"):
+            ss = self.cfg.get("start_seconds")
+            if ss is not None: args += ["-ss", str(ss)]
+        args += ["-i", str(video), "-vf", "fps=1", "-frames:v", "1", str(out_pattern)]
+        self._run_ffmpeg(args)
+        return dst
+
+    def _neko_use_image_as_background(self, img_src: Path, pack_root: Path) -> Path:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / self.NEKO_ANIM_BG_DIR
+        if dst.exists(): shutil.rmtree(dst)
+        self._ensure_dir(dst)
+        out_path = dst / f"{FRAME_PREFIX_ANIM}001.png"
+        if img_src.suffix.lower() == ".png":
+            shutil.copy2(img_src, out_path)
+            self.log(f"[NekoUI] Image is already PNG — copied as {out_path.name}")
+        else:
+            self.log(f"[NekoUI] Converting {img_src.name} → PNG…")
+            Image.open(str(img_src)).convert("RGBA").save(str(out_path), "PNG")
+        return dst
+
+    def _neko_copy_loading_bg_folder(self, pack_root: Path) -> Path:
+        src_folder = self.cfg.get("loading_bg_folder", "").strip()
+        dst = pack_root / self.NEKO_LOADING_BG_DIR
+        self._ensure_dir(dst)
+        if not src_folder:
+            return dst
+        src = Path(src_folder)
+        if not src.is_dir():
+            self.log(f"⚠️ [NekoUI] Loading BG folder not found: {src}")
+            return dst
+        IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        images = sorted([f for f in src.iterdir() if f.suffix.lower() in IMG_EXT])
+        if not images:
+            return dst
+        try:
+            nums = [int(f.stem) for f in images]
+            for new_idx, img in enumerate(
+                sorted(images, key=lambda f: int(f.stem)), start=1
+            ):
+                shutil.copy2(img, dst / f"{new_idx}{img.suffix.lower()}")
+            self.log(f"[NekoUI] ✓ {len(images)} loading BG images copied (numeric order).")
+        except ValueError:
+            self.log("[NekoUI] Loading BG images are not numerically named – requesting order from user...")
+            ordered = self._request_image_order(images)
+            if ordered is None:
+                self.log("[NekoUI] ⚠️ User cancelled image ordering.")
+                return dst
+            for new_idx, img in enumerate(ordered, start=1):
+                shutil.copy2(img, dst / f"{new_idx}{img.suffix.lower()}")
+            self.log(f"[NekoUI] ✓ {len(ordered)} loading BG images copied (custom order).")
+        return dst
+
+    def _neko_download_container_bg(self, pack_root: Path):
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst = pack_root / self.NEKO_CONTAINER_BG_DIR
+        self._ensure_dir(dst)
+        self.log(f"[NekoUI] Downloading container background...")
+        try:
+            r = requests.get(self.NEKO_CONTAINER_BG_URL, timeout=60)
+            r.raise_for_status()
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                tmp.write(r.content)
+                tmp_path = Path(tmp.name)
+            with zipfile.ZipFile(tmp_path) as zf:
+                zf.extractall(dst)
+            tmp_path.unlink()
+            self.log(f"[NekoUI] Container background extracted → {dst}")
+        except Exception as e:
+            self.log(f"⚠️ [NekoUI] Failed to download container background: {e}")
+        self._apply_custom_container_bg(dst)
+
+    def _neko_copy_bgm(self, pack_root: Path):
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        bgm_file = self.cfg.get("bgm_file", "").strip()
+        if not bgm_file:
+            return
+        src = Path(bgm_file)
+        if not src.exists():
+            raise FileNotFoundError(f"BGM file not found: {src}")
+        dst_dir = pack_root / self.NEKO_SOUNDS_DIR
+        self._ensure_dir(dst_dir)
+        dst = dst_dir / "bgm1.ogg"
+        if src.suffix.lower() == ".ogg":
+            shutil.copy2(src, dst)
+            self.log(f"[NekoUI] BGM copied → bgm1.ogg")
+        else:
+            self.log(f"[NekoUI] Converting {src.name} → bgm1.ogg (Vorbis OGG)…")
+            self._run_ffmpeg(["-y", "-i", str(src), "-acodec", "libvorbis", "-q:a", "6", str(dst)])
+            self.log("[NekoUI] BGM conversion done ✓")
+
+    def _neko_download_audio(self, video: Path, pack_root: Path):
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        dst_dir = pack_root / self.NEKO_SOUNDS_DIR
+        self._ensure_dir(dst_dir)
+        dst = dst_dir / "bgm1.ogg"
+        self.log(f"[NekoUI] Extracting audio → {dst}")
+        self._run_ffmpeg(["-y", "-i", str(video), "-vn", "-acodec", "libvorbis", str(dst)])
+        self.log("[NekoUI] Audio extracted ✓")
+
+    def _neko_download_youtube_audio(self, url: str, pack_root: Path):
+        dst_dir = pack_root / self.NEKO_SOUNDS_DIR
+        self._ensure_dir(dst_dir)
+        out_tmpl = dst_dir / "bgm1.%(ext)s"
+        cookie_args = self._get_ytdlp_cookie_args()
+        cmd = ["yt-dlp"] + cookie_args + ["-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
+        self._run_subprocess(cmd)
+        self.log("[NekoUI] YouTube audio downloaded ✓")
+
+    def _neko_make_blur(self, anim_dir: Path):
+        self._make_blur_png_for_dir(anim_dir)
+
+    # ── JSON generators ───────────────────────────────────────────────────────
+
+    def _neko_gen_hans_animated_background(self, anim_dir: Path, common_dir: Path):
+        """Generate hans_animated_background.json in .hans_common_files/"""
+        _ANIM_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga"]
+        frames = []
+        for ext in _ANIM_EXTS:
+            frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*{ext}"))
+            if frames: break
+        n = len(frames)
+        if n == 0:
+            self.log("[NekoUI] ⚠️ No anim frames – skipping hans_animated_background.json")
+            return
+
+        dur = round(1.0 / max(self.cfg.get("fps", DEFAULT_FPS), 1), 9)
+
+        lines = []
+        lines.append('  "namespace": "hans_animated_background",')
+        lines.append('  "core_img": { "type": "image","fill": true,"layer": 1 },')
+        lines.append('  "blur@core_img": { "texture": "neko_ui_public_animated_background/blur" },')
+        lines.append(
+            '  "viewgnette_effect": { "type": "panel", "controls": "$hans_viewgnette_effect",'
+            ' "bindings": [ { "binding_type": "view", "source_control_name": "nekoui_hidegui",'
+            ' "source_property_name": "( not #toggle_state )", "target_property_name": "#visible" } ],'
+            ' "variables": [ { "requires": "$win10_edition",'
+            ' "$hans_viewgnette_effect": [ { "vieg_windows@core_img": { "texture": ".hans_common_files/vieg_win" }}] },'
+            ' { "requires": "( not $win10_edition )",'
+            ' "$hans_viewgnette_effect": [ { "vieg_windows@core_img": { "texture": ".hans_common_files/vieg" }}] } ] },'
+        )
+        lines.append(
+            '  "img": { "type": "image", "fill": true, "property_bag": {"#true": "0"},'
+            ' "bindings": [ { "binding_name": "#collection_index", "binding_type": "collection_details",'
+            ' "binding_collection_name": "animated_background" },'
+            ' { "binding_type": "view", "source_property_name": "(\'#\' + (#collection_index < 9))", "target_property_name": "#pad00" },'
+            ' { "binding_type": "view", "source_property_name": "(\'#\' + (#collection_index < 99))", "target_property_name": "#pad0" },'
+            ' { "binding_type": "view",'
+            ' "source_property_name": "(\'neko_ui_public_animated_background/hans\' + \'_common_\' + #pad00 + #pad0 + (#collection_index + 1))",'
+            ' "target_property_name": "#texture" } ] },'
+        )
+        lines.append(
+            '  "bg_anim": { "type": "panel", "size": [ "100%", "100%" ],'
+            ' "controls": [ { "viewgnette_effect@hans_animated_background.viewgnette_effect": {} },'
+            ' { "bg_anim_b@hans_animated_background.bg_anim_b": {} } ] },'
+        )
+        lines.append(
+            f'  "bg_anim_b": {{ "size": [ "100%", "100%" ], "type": "stack_panel",'
+            f' "anchor_from": "top_left", "anchor_to": "top_left", "offset": "@hans_animated_background.01",'
+            f' "$duration_per_frame|default": {dur}, "$frames|default": {n},'
+            f' "collection_name": "animated_background",'
+            f' "factory": {{"name": "test", "control_name": "hans_animated_background.img"}},'
+            f' "property_bag": {{"#frames": "$frames"}},'
+            f' "bindings": [ {{ "binding_type": "view", "source_property_name": "(#frames*1)",'
+            f' "target_property_name": "#collection_length" }} ] }},'
+        )
+        lines.append(
+            '  "hans_anim_base": { "destroy_at_end": "@hans_animated_background.bg_anim",'
+            ' "anim_type": "offset", "easing": "linear",'
+            ' "duration": "$duration_per_frame", "from": "$anm_offset", "to": "$anm_offset" },'
+        )
+        lines.append('')
+
+        for i in range(1, n + 1):
+            key      = f"{i:02d}"
+            y_pct    = "0%" if i == 1 else f"-{(i-1)*100}%"
+            next_key = f"{(i % n) + 1:02d}"
+            trailing = "," if i < n else ""
+            lines.append(
+                f'  "{key}@hans_animated_background.hans_anim_base":'
+                f'{{"$anm_offset": [ "0px", "{y_pct}" ],"next": "@hans_animated_background.{next_key}"}}{trailing}'
+            )
+
+        content = "{\n" + "\n".join(lines) + "\n}"
+        out = common_dir / "hans_animated_background.json"
+        out.write_text(content, encoding="utf-8")
+        self.log(f"[NekoUI] hans_animated_background.json generated ({n} frames) → {out}")
+
+    def _neko_gen_hans_loading_background(self, load_dir: Path, common_dir: Path):
+        """Generate hans_loading_background.json in .hans_common_files/"""
+        IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        all_imgs = [f for f in load_dir.iterdir() if f.suffix.lower() in IMG_EXT]
+        frames = sorted(all_imgs, key=lambda p: int(p.stem) if p.stem.isdigit() else 0)
+        n = len(frames)
+        if n == 0:
+            self.log("[NekoUI] ⚠️ No loading frames – skipping hans_loading_background.json")
+            return
+
+        ctrl_lines = []
+        for i in range(1, n + 1):
+            trailing = "," if i < n else ""
+            ctrl_lines.append(f'      {{ "{i}@bgl_animations.img": {{ "$img": "{i}" }} }}{trailing}')
+
+        anim_lines = []
+        for i in range(1, n + 1):
+            key      = f"{i:02d}"
+            y_pct    = "0%" if i == 1 else f"-{(i-1)*100}%"
+            next_key = f"{(i % n) + 1:02d}"
+            trailing = "," if i < n else ""
+            anim_lines.append(
+                f'  "{key}@bgl_animations.anim_base":'
+                f'{{"$anm_offset": [ 0, "{y_pct}" ],"next": "@bgl_animations.{next_key}"}}{trailing}'
+            )
+
+        content = """{
+  "namespace": "bgl_animations",
+  "anim_base": {
+    "anim_type": "offset",
+    "easing": "linear",
+    "duration": "$duration_per_frame",
+    "from": "$anm_offset",
+    "to": "$anm_offset"
+  },
+  "img": {
+    "type": "image",
+    "fill": true,
+    "bilinear": true,
+    "size": [ "100%", "100%" ],
+    "texture": "('neko_ui_public_loading_background/' + $img )"
+  },
+  "bg_anim": {
+    "type": "stack_panel",
+    "size": [ "100%", "100%" ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left",
+    "offset": "@bgl_animations.01",
+    "$duration_per_frame|default": 1.5,
+    "controls": [
+""" + "\n".join(ctrl_lines) + """
+    ]
+  },
+  /*///// FRAMES /////*/
+""" + "\n".join(anim_lines) + """
+}"""
+        out = common_dir / "hans_loading_background.json"
+        out.write_text(content, encoding="utf-8")
+        self.log(f"[NekoUI] hans_loading_background.json generated ({n} frames) → {out}")
+
+    def _neko_gen_sound_definitions(self, pack_root: Path):
+        content = """{
+  "music.menu": {
+    "category": "music",
+    "sounds": [
+      {
+        "name": "sounds/music/background music/bgm1",
+        "stream": true,
+        "volume": 0.3
+      }
+    ]
+  }
+}"""
+        out = pack_root / "sounds" / "sound_definitions.json"
+        self._ensure_dir(out.parent)
+        out.write_text(content, encoding="utf-8")
+        self.log("[NekoUI] sounds/sound_definitions.json generated ✓")
+
+    def _neko_gen_sub_backgrounds(self, common_dir: Path):
+        """Generate the sub_backgrounds UI definition JSON in .hans_common_files/"""
+        content = """{
+    "namespace": "hans_sub_backgrounds",
+
+    "common_panel": { "type": "panel" },
+    "common_image": { "type": "image", "texture": "( 'neko_ui_public_container_background/' + $neko_container_bg )", "$neko_container_bg|default": "default" },
+
+    "horse_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "horse_screen"},
+    "hans_anvil_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "cartography_screen"},
+    "loom_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "loom_screen"},
+    "cartography_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "anvil_screen"},
+    "hans_chest_background@hans_sub_backgrounds.common_image": {"$neko_container_bg": "chest_background"},
+    "hans_chest_background_large@hans_sub_backgrounds.common_image": {"$neko_container_bg": "chest_background_large"},
+    "hans_enchanting_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "enchanting_screen"},
+    "hans_furnace_background@hans_sub_backgrounds.common_image": {"$neko_container_bg": "furnace_background"},
+    "hans_grindstone_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "grindstone_screen"},
+    "hans_inventory_background@hans_sub_backgrounds.common_image": {"$neko_container_bg": "inventory_background"},
+    "hans_smithing_table@hans_sub_backgrounds.common_image": {"$neko_container_bg": "smithing_table"},
+    "hans_stone_cutter_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "stone_cutter_screen"},
+    "hans_brewing_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "brewing_screen"},
+    "hans_beacon_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "beacon_screen"},
+    "hans_common_redstone_screen@hans_sub_backgrounds.common_image": {"$neko_container_bg": "redstone_screen_common"}
+}"""
+        out = common_dir / "sub_backgrounds.json"
+        out.write_text(content, encoding="utf-8")
+        self.log("[NekoUI] .hans_common_files/sub_backgrounds.json generated ✓")
+
+    def _neko_gen_ui_defs(self, pack_root: Path):
+        content = """{
+    "ui_defs": [
+        ".hans_common_files/hans_animated_background.json",
+        ".hans_common_files/hans_loading_background.json"
+    ]
+}"""
+        ui_dir = pack_root / UI_DIR
+        self._ensure_dir(ui_dir)
+        (ui_dir / "_ui_defs.json").write_text(content, encoding="utf-8")
+        self.log("[NekoUI] ui/_ui_defs.json generated ✓")
+
+    def _neko_gen_global_variables(self, pack_root: Path):
+        creator  = self.cfg.get("creator", "Unknown")
+        ver_x    = int(self.cfg.get("ext_ver_x", 201))
+        ver_y    = int(self.cfg.get("ext_ver_y", 1))
+        ver_z    = int(self.cfg.get("ext_ver_z", 0))
+        ext_name = self.cfg.get("new_pack_name", "MyExtension")
+        content = f"""{{
+  /* -------------------------- EXTENSION -------------------------- */
+  // To display Extension Version and Extension Creator Name in NekoUI About Settings
+  // Default = True
+
+  "$neko_ui_use_extension": true,
+  "$neko_ui_extension_version": "{ext_name}",
+  "$neko_ui_extension_creator_name": "{creator}"
+
+  /* -------------------------- EXTENSION -------------------------- */
+}}"""
+        ui_dir = pack_root / UI_DIR
+        self._ensure_dir(ui_dir)
+        (ui_dir / "_global_variables.json").write_text(content, encoding="utf-8")
+        self.log("[NekoUI] ui/_global_variables.json generated ✓")
+
+    def _neko_gen_static_anim_bg_json(self, static_anim_dir: Path, static_root: Path):
+        """Generate hans_animated_background.json for the static subpack."""
+        common_dir = static_root / self.NEKO_COMMON_DIR
+        self._ensure_dir(common_dir)
+        self._neko_gen_hans_animated_background(static_anim_dir, common_dir)
+
+    def _neko_build_both_subpacks(self, video: Path, pack_root: Path) -> Path:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+
+        anim_dir = self._neko_extract_frames_anim(video, pack_root)
+
+        static_anim_dir = pack_root / "subpacks" / "static" / self.NEKO_ANIM_BG_DIR
+        self._ensure_dir(static_anim_dir)
+
+        # Copy first frame into static subpack
+        frames = sorted(anim_dir.glob(f"{FRAME_PREFIX_ANIM}*.png"))
+        if not frames:
+            self.log("[NekoUI] No anim frames found - skipping static subpack.")
+            return anim_dir
+
+        first_frame = frames[0]
+        shutil.copy2(first_frame, static_anim_dir / first_frame.name)
+        self.log(f"[NekoUI] Static subpack: copied {first_frame.name} → {static_anim_dir}")
+
+        self._make_blur_png_for_dir(static_anim_dir)
+
+        static_root = pack_root / "subpacks" / "static"
+        self._neko_gen_static_anim_bg_json(static_anim_dir, static_root)
+
+        self.log("[NekoUI] Both mode: dynamic + static subpack prepared")
+        return anim_dir
+
+    # ── main process override ─────────────────────────────────────────────────
+
+    def process(self):
+        self._monitor_memory()
+        total_steps = 15
+        step = [0]
+
+        def tick(label=""):
+            step[0] += 1
+            pct = int(step[0] / total_steps * 100)
+            self.progress_signal.emit(pct)
+            if label: self.log(f"[{step[0]}/{total_steps}] {label}")
+
+        output_folder = Path(self.cfg["output_folder"]).resolve()
+        self._ensure_dir(output_folder)
+        ext_name  = self.cfg["new_pack_name"].strip()
+        pack_root = output_folder / ext_name
+        if pack_root.exists(): shutil.rmtree(pack_root)
+        self._ensure_dir(pack_root)
+        self._temp_files.append(pack_root)
+        tick("Pack folder created")
+
+        # Create NekoUI folder structure
+        for d in [
+            self.NEKO_ANIM_BG_DIR,
+            self.NEKO_LOADING_BG_DIR,
+            self.NEKO_CONTAINER_BG_DIR,
+            self.NEKO_COMMON_DIR,
+            self.NEKO_SOUNDS_DIR,
+            UI_DIR,
+            "subpacks/dynamic",
+            "subpacks/static/" + self.NEKO_COMMON_DIR,
+            "subpacks/static/" + self.NEKO_ANIM_BG_DIR,
+        ]:
+            self._ensure_dir(pack_root / d)
+        tick("NekoUI folder structure created")
+
+        video_input     = self.cfg["video_path"]
+        source_is_image = self.cfg.get("source_is_image", False)
+        delete_after    = False
+
+        if source_is_image:
+            img_src = Path(video_input).resolve()
+            if not img_src.exists():
+                raise FileNotFoundError(f"Image not found: {img_src}")
+            video = None
+            tick("Image source ready")
+
+            anim_dir = self._neko_use_image_as_background(img_src, pack_root)
+            tick("Image placed as background frame")
+
+            if self.cfg.get("loading_bg_folder", "").strip():
+                load_dir = self._neko_copy_loading_bg_folder(pack_root)
+                tick("Loading background images copied from folder")
+            else:
+                load_dir = pack_root / self.NEKO_LOADING_BG_DIR
+                self._ensure_dir(load_dir)
+                src_frame = anim_dir / f"{FRAME_PREFIX_ANIM}001.png"
+                shutil.copy2(src_frame, load_dir / "1.png")
+                self.log("[NekoUI] Image mode: using bg image as loading frame")
+                tick("Loading background frame set from image")
+        else:
+            if re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
+                self.cfg["is_trimmed"] = False
+                video = self._download_youtube(video_input, output_folder / "_tmp_yt")
+                self._temp_files.append(video.parent)
+                delete_after = True
+            else:
+                video = Path(video_input).resolve()
+                if not video.exists():
+                    raise FileNotFoundError(f"Video not found: {video}")
+                self.cfg["is_trimmed"] = False
+            tick("Video ready")
+
+            bg_mode = self.cfg.get("bg_mode", "dynamic")
+            self.log(f"[NekoUI] Background mode: {bg_mode}")
+
+            if bg_mode == "static":
+                anim_dir = self._neko_extract_frame_static(video, pack_root)
+                tick("Static background frame extracted")
+            elif bg_mode == "both":
+                anim_dir = self._neko_build_both_subpacks(video, pack_root)
+                tick("Dynamic + static subpack frames prepared")
+            else:
+                anim_dir = self._neko_extract_frames_anim(video, pack_root)
+                tick("Animated background frames extracted")
+
+            if self.cfg.get("loading_bg_folder", "").strip():
+                load_dir = self._neko_copy_loading_bg_folder(pack_root)
+                tick("Loading background images copied from folder")
+            elif self.cfg.get("use_black_loading"):
+                load_dir = pack_root / self.NEKO_LOADING_BG_DIR
+                self._gen_black_loading_frame(load_dir)
+                tick("Loading background: black frame")
+            else:
+                load_dir = self._neko_extract_frames_loading(video, pack_root)
+                tick("Loading background frames extracted")
+
+        self._make_blur_png_for_dir(anim_dir)
+        tick("blur.png created")
+
+        method = self.cfg.get("compress_method", "lossless").lower()
+        compressor = self._get_compressor(method)
+        if compressor:
+            self.log(f"[NekoUI] Compressing anim frames via {method}...")
+            compressor.compress(anim_dir)
+        tick("Anim frames compressed")
+
+        if compressor:
+            self.log(f"[NekoUI] Compressing loading frames via {method}...")
+            compressor.compress(load_dir)
+        tick("Loading frames compressed")
+
+        self._neko_download_container_bg(pack_root)
+        tick("Container background downloaded")
+
+        if self.cfg.get("bgm_file", "").strip():
+            self._neko_copy_bgm(pack_root)
+        elif re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
+            self._neko_download_youtube_audio(video_input, pack_root)
+        elif video:
+            self._neko_download_audio(video, pack_root)
+        tick("Audio prepared")
+
+        self._copy_pack_icon(pack_root)
+        tick("Pack icon copied")
+
+        # Generate all NekoUI JSON files
+        common_dir = pack_root / self.NEKO_COMMON_DIR
+        self._neko_gen_hans_animated_background(anim_dir, common_dir)
+        self._neko_gen_hans_loading_background(load_dir, common_dir)
+        self._neko_gen_sub_backgrounds(common_dir)
+        self._neko_gen_sound_definitions(pack_root)
+        self._neko_gen_ui_defs(pack_root)
+        self._neko_gen_global_variables(pack_root)
+        self._gen_manifest(pack_root)
+        tick("JSON files generated")
+
+        zip_base = output_folder / (ext_name + ".mcpack")
+        if zip_base.exists(): zip_base.unlink()
+        self.log(f"[NekoUI] Packing → {zip_base}")
+        shutil.make_archive(str(zip_base.with_suffix("")), "zip", pack_root)
+        zip_tmp = zip_base.with_suffix(".zip")
+        if zip_tmp.exists(): zip_tmp.rename(zip_base)
+        tick("mcpack created")
+
+        shutil.rmtree(pack_root, ignore_errors=True)
+        self._temp_files.remove(pack_root)
+        if delete_after and video:
+            shutil.rmtree(video.parent, ignore_errors=True)
+        tick("Cleanup done")
+
+        self.log(f"\n✅ [NekoUI] Done! Output: {zip_base}")
+        self.progress_signal.emit(100)
+        return True
+
+
+class JavaWorker(Worker):
+    """
+    Builds a Java Edition resource pack (.zip) with a simple structure:
+
+        {extension_name}/
+        ├── assets/
+        │   └── nekoui/
+        │       └── background/
+        │           └── {extension_name}/
+        │               ├── {extension_name}1.png
+        │               ├── {extension_name}2.png
+        │               └── ...
+        └── pack.mcmeta
+
+    The pack is zipped as {extension_name}.zip (not .mcpack).
+    Works for both HorizonUI and NekoUI Java tabs — same structure.
+    """
+
+    def _java_safe_name(self) -> str:
+        """Filesystem-safe version of the pack name for file/folder naming."""
+        return re.sub(r'[\\/:*?"<>|§]', "_", self.cfg.get("new_pack_name", "MyExtension").strip())
+
+    def _success_message(self) -> str:
+        return "✅ .zip created successfully!"
+
+    def _java_extract_frames(self, video: Path, frames_dir: Path) -> Path:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        if frames_dir.exists(): shutil.rmtree(frames_dir)
+        self._ensure_dir(frames_dir)
+        n   = int(self.cfg.get("anim_frames", 100))
+        fps = self.cfg.get("fps", DEFAULT_FPS)
+        tmp = frames_dir / "frame_%03d.png"
+        args = ["-y"]
+        if not self.cfg.get("is_trimmed"):
+            ss = self.cfg.get("start_seconds")
+            en = self.cfg.get("end_seconds")
+            if ss is not None: args += ["-ss", str(ss)]
+            if en is not None and ss is not None: args += ["-t", str(en - ss)]
+        args += ["-i", str(video), "-vf", f"fps={fps}", "-frames:v", str(n), str(tmp)]
+        self._run_ffmpeg(args)
+        return frames_dir
+
+    def _java_rename_frames(self, frames_dir: Path, safe_name: str) -> int:
+        """Rename frame_001.png → {name}1.png, frame_002.png → {name}2.png …"""
+        frames = sorted(frames_dir.glob("frame_*.png"))
+        for idx, f in enumerate(frames, start=1):
+            f.rename(frames_dir / f"{safe_name}{idx}.png")
+        return len(frames)
+
+    def _java_use_image(self, img_src: Path, frames_dir: Path, safe_name: str) -> int:
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        self._ensure_dir(frames_dir)
+        out = frames_dir / f"{safe_name}1.png"
+        if img_src.suffix.lower() == ".png":
+            shutil.copy2(img_src, out)
+        else:
+            Image.open(str(img_src)).convert("RGBA").save(str(out), "PNG")
+        self.log(f"[Java] Image placed as {out.name}")
+        return 1
+
+    def _java_copy_pack_icon(self, pack_root: Path):
+        """Save pack icon as pack.png (Java Edition convention)."""
+        if self._stop_requested: raise RuntimeError("Cancelled.")
+        pil_img  = self.cfg.get("pack_icon_pil")
+        raw_path = self.cfg.get("pack_icon_path", "").strip()
+        if pil_img is not None:
+            dst = pack_root / "pack.png"
+            pil_img.save(str(dst), "PNG")
+            self.log(f"[Java] pack.png saved (cropped 256×256) → {dst}")
+        elif raw_path:
+            src = Path(raw_path)
+            if src.exists():
+                dst = pack_root / "pack.png"
+                shutil.copy2(src, dst)
+                self.log(f"[Java] pack.png copied → {dst}")
+        else:
+            self.log("[Java] No pack icon specified — skipping pack.png.")
+
+    def _java_gen_pack_mcmeta(self, pack_root: Path):
+        name    = self.cfg.get("new_pack_name", "MyExtension").strip()
+        creator = self.cfg.get("creator", "Unknown")
+        ver_x   = int(self.cfg.get("ext_ver_x", 1))
+        ver_y   = int(self.cfg.get("ext_ver_y", 0))
+        ver_z   = int(self.cfg.get("ext_ver_z", 0))
+        desc    = f"§fNekoUI AB - {name} (v{ver_x}.{ver_y}.{ver_z}) - by {creator}"
+        content = json.dumps({
+            "pack": {
+                "pack_format": 15,
+                "description": desc
+            }
+        }, indent=2, ensure_ascii=False)
+        (pack_root / "pack.mcmeta").write_text(content, encoding="utf-8")
+        self.log("[Java] pack.mcmeta generated ✓")
+
+    def process(self):
+        self._monitor_memory()
+        total_steps = 8
+        step = [0]
+
+        def tick(label=""):
+            step[0] += 1
+            self.progress_signal.emit(int(step[0] / total_steps * 100))
+            if label: self.log(f"[{step[0]}/{total_steps}] {label}")
+
+        output_folder = Path(self.cfg["output_folder"]).resolve()
+        self._ensure_dir(output_folder)
+        ext_name  = self.cfg["new_pack_name"].strip()
+        safe_name = self._java_safe_name()
+        pack_root = output_folder / ext_name
+        if pack_root.exists(): shutil.rmtree(pack_root)
+        self._ensure_dir(pack_root)
+        self._temp_files.append(pack_root)
+        tick("Pack folder created")
+
+        frames_dir = pack_root / "assets" / "nekoui" / "background" / safe_name
+        self._ensure_dir(frames_dir)
+        tick("Folder structure created")
+
+        video_input     = self.cfg["video_path"]
+        source_is_image = self.cfg.get("source_is_image", False)
+        delete_after    = False
+
+        if source_is_image:
+            img_src = Path(video_input).resolve()
+            if not img_src.exists():
+                raise FileNotFoundError(f"Image not found: {img_src}")
+            n = self._java_use_image(img_src, frames_dir, safe_name)
+            tick(f"Image placed ({n} frame)")
+        else:
+            if re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", video_input):
+                self.cfg["is_trimmed"] = False
+                video = self._download_youtube(video_input, output_folder / "_tmp_yt")
+                self._temp_files.append(video.parent)
+                delete_after = True
+            else:
+                video = Path(video_input).resolve()
+                if not video.exists():
+                    raise FileNotFoundError(f"Video not found: {video}")
+                self.cfg["is_trimmed"] = False
+            tick("Video ready")
+
+            self._java_extract_frames(video, frames_dir)
+            n = self._java_rename_frames(frames_dir, safe_name)
+            tick(f"{n} frames extracted and renamed")
+
+        method = self.cfg.get("compress_method", "lossless").lower()
+        compressor = self._get_compressor(method)
+        if compressor:
+            self.log(f"[Java] Compressing frames via {method}...")
+            compressor.compress(frames_dir)
+        tick("Frames compressed")
+
+        self._java_copy_pack_icon(pack_root)
+        self._java_gen_pack_mcmeta(pack_root)
+        tick("Metadata generated")
+
+        zip_base = output_folder / (ext_name + ".zip")
+        if zip_base.exists(): zip_base.unlink()
+        self.log(f"[Java] Packing → {zip_base}")
+        shutil.make_archive(str(zip_base.with_suffix("")), "zip", pack_root)
+        # make_archive always produces .zip so no rename needed
+        tick(".zip created")
+
+        shutil.rmtree(pack_root, ignore_errors=True)
+        self._temp_files.remove(pack_root)
+        if delete_after:
+            shutil.rmtree(video.parent, ignore_errors=True)
+        tick("Cleanup done")
+
+        self.log(f"\n✅ [Java] Done! Output: {zip_base}")
+        self.progress_signal.emit(100)
+        return True
+
+
 class AnnouncementBanner(QWidget):
     """
-    Fetches a plain-text announcement from a remote URL and displays it
-    as a dismissible top bar. The banner stays hidden (height=0) until
-    content arrives; it silently disappears if the fetch fails or the
-    file is empty.
+    Floating pill-shaped announcement banner.
+    - Right-aligned, width = 2/5 of parent, small right margin
+    - 10s countdown then auto-dismisses with fade animation
+    - Draggable: swipe up/right/left to dismiss
+    - X button to dismiss immediately
     """
-    _FETCH_URL = "https://tubeo5866.github.io/banner.txt"
+    _FETCH_URL    = "https://tubeo5866.github.io/banner.txt"
+    _MIN_HEIGHT   = 38
+    _RIGHT_MARGIN = 12
+    _TOP_MARGIN   = 10
+    _COUNTDOWN    = 10  # seconds
+    _V_PADDING    = 10  # vertical padding inside pill
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setFixedHeight(0)          # hidden until content arrives
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.setWindowFlags(Qt.SubWindow)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.hide()
+
+        self._drag_start  = None
+        self._drag_origin = None
+        self._dismissed   = False
+        self._countdown   = self._COUNTDOWN
+
+        from PyQt5.QtWidgets import QGraphicsOpacityEffect
+        self._opacity_fx = QGraphicsOpacityEffect(self)
+        self._opacity_fx.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity_fx)
+
+        self._fade_anim = QtCore.QPropertyAnimation(self._opacity_fx, b"opacity")
+        self._fade_anim.setDuration(300)
+        self._fade_anim.setStartValue(1.0)
+        self._fade_anim.setEndValue(0.0)
+        self._fade_anim.finished.connect(self._on_fade_done)
+
+        self._slide_anim = QtCore.QPropertyAnimation(self, b"pos")
+        self._slide_anim.setDuration(300)
+        self._slide_anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+
+        self._timer = QtCore.QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._on_tick)
+
         self._build()
         self._fetch()
 
-    # ── UI construction ───────────────────────────────────────────────────────
+    # ── UI ────────────────────────────────────────────────────────────────────
     def _build(self):
-        self._hlayout = QHBoxLayout(self)
-        self._hlayout.setContentsMargins(10, 3, 6, 3)
-        self._hlayout.setSpacing(8)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 8, 0)
+        layout.setSpacing(6)
 
-        # Megaphone icon
         icon_lbl = QLabel("📢")
-        icon_lbl.setStyleSheet("font-size:14px; background:transparent;")
-        icon_lbl.setFixedWidth(22)
+        icon_lbl.setStyleSheet("font-size:12px; background:transparent;")
+        icon_lbl.setFixedWidth(18)
+        icon_lbl.setAttribute(Qt.WA_TranslucentBackground)
 
-        # Announcement text
         self._lbl = QLabel()
         self._lbl.setWordWrap(True)
         self._lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self._lbl.setStyleSheet(
-            "font-size:11px; font-weight:bold; color:#ffffff; "
-            "padding-left:2px; background:transparent;"
+            "font-size:10px; font-weight:bold; color:#ffffff; background:transparent;"
         )
+        self._lbl.setAttribute(Qt.WA_TranslucentBackground)
 
-        # Dismiss button
         btn_close = QPushButton("✕")
         btn_close.setFixedSize(20, 20)
-        btn_close.setToolTip("Dismiss announcement")
+        btn_close.setToolTip("Dismiss")
         btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.setAttribute(Qt.WA_TranslucentBackground)
         btn_close.setStyleSheet(
-            "QPushButton { background:transparent; color:#ffffffaa; border:none; "
-            "             font-size:13px; font-weight:bold; }"
-            "QPushButton:hover { color:#ffffff; }"
+            "QPushButton { background:rgba(255,255,255,30); color:#ffffffcc; "
+            "border:none; border-radius:10px; font-size:11px; font-weight:bold; }"
+            "QPushButton:hover { background:rgba(255,255,255,70); color:#ffffff; }"
         )
         btn_close.clicked.connect(self._dismiss)
 
-        self._hlayout.addWidget(icon_lbl)
-        self._hlayout.addWidget(self._lbl, stretch=1)
-        self._hlayout.addWidget(btn_close, alignment=Qt.AlignVCenter)
+        layout.addWidget(icon_lbl)
+        layout.addWidget(self._lbl, stretch=1)
+        layout.addWidget(btn_close, alignment=Qt.AlignVCenter)
 
-    # ── Custom gradient background ────────────────────────────────────────────
+    # ── Pill painting ─────────────────────────────────────────────────────────
     def paintEvent(self, event):
         from PyQt5.QtGui import QLinearGradient
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        # Dark-navy → teal gradient
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 20, 20)
         grad = QLinearGradient(0, 0, self.width(), 0)
         grad.setColorAt(0.0, QColor("#0d1b4b"))
         grad.setColorAt(1.0, QColor("#005f73"))
-        painter.fillRect(self.rect(), grad)
-        # Bright left-edge accent stripe
-        painter.fillRect(0, 0, 4, self.height(), QColor("#00b4d8"))
+        painter.fillPath(path, grad)
+        painter.setPen(QtGui.QPen(QColor("#00b4d8"), 1.0))
+        painter.drawPath(path)
         painter.end()
 
-    # ── Async fetch ───────────────────────────────────────────────────────────
-    def _fetch(self):
-        """Download banner text in a background QThread — UI never blocks."""
+    # ── Positioning ───────────────────────────────────────────────────────────
+    def _reposition(self):
+        p = self.parent()
+        if p is None:
+            return
+        pw = p.width()
+        pill_w = max(pw * 2 // 5, 180)
+        self.setFixedWidth(pill_w)
+        # Compute required label height given the pill width
+        inner_w = pill_w - 18 - 24 - 20 - 12 - 6 * 3  # subtract icons/btn/margins
+        self._lbl.setFixedWidth(max(inner_w, 60))
+        lbl_h = self._lbl.heightForWidth(max(inner_w, 60))
+        if lbl_h < 1:
+            lbl_h = self._lbl.sizeHint().height()
+        pill_h = max(lbl_h + self._V_PADDING * 2, self._MIN_HEIGHT)
+        self.setFixedHeight(pill_h)
+        x = pw - pill_w - self._RIGHT_MARGIN
+        self.move(x, self._TOP_MARGIN)
 
+    # ── Countdown ─────────────────────────────────────────────────────────────
+    def _on_tick(self):
+        self._countdown -= 1
+        if self._countdown <= 0:
+            self._timer.stop()
+            self._dismiss()
+
+    # ── Drag ─────────────────────────────────────────────────────────────────
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start  = event.globalPos()
+            self._drag_origin = self.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            self._timer.stop()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is not None:
+            delta = event.globalPos() - self._drag_start
+            new_y = min(self._drag_origin.y() + delta.y(), self._drag_origin.y())
+            self.move(self._drag_origin.x() + delta.x(), new_y)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_start is not None and self._drag_origin is not None:
+            delta = event.globalPos() - self._drag_start
+            threshold = 55
+            if abs(delta.x()) > threshold or delta.y() < -threshold:
+                p = self.parent()
+                pw = p.width() if p else 800
+                if delta.y() < -threshold:
+                    end_pos = QtCore.QPoint(self.x(), -self.height() - 20)
+                elif delta.x() > 0:
+                    end_pos = QtCore.QPoint(pw + 20, self.y())
+                else:
+                    end_pos = QtCore.QPoint(-pw - 20, self.y())
+                self._slide_anim.setStartValue(self.pos())
+                self._slide_anim.setEndValue(end_pos)
+                self._slide_anim.start()
+                self._fade_anim.start()
+                self._dismissed = True
+            else:
+                snap = QtCore.QPropertyAnimation(self, b"pos")
+                snap.setDuration(200)
+                snap.setEasingCurve(QtCore.QEasingCurve.OutBack)
+                snap.setStartValue(self.pos())
+                snap.setEndValue(self._drag_origin)
+                snap.start()
+                self._snap_anim = snap
+                self._timer.start()
+        self._drag_start  = None
+        self._drag_origin = None
+        self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+    def enterEvent(self, event):
+        if not self._dismissed:
+            self.setCursor(Qt.OpenHandCursor)
+            self._timer.stop()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setCursor(Qt.ArrowCursor)
+        if not self._dismissed and self.isVisible():
+            self._timer.start()
+        super().leaveEvent(event)
+
+    # ── Dismiss ───────────────────────────────────────────────────────────────
+    def _dismiss(self):
+        if self._dismissed:
+            return
+        self._dismissed = True
+        self._timer.stop()
+        end_pos = QtCore.QPoint(self.x(), -self.height() - 20)
+        self._slide_anim.setStartValue(self.pos())
+        self._slide_anim.setEndValue(end_pos)
+        self._slide_anim.start()
+        self._fade_anim.start()
+
+    def _on_fade_done(self):
+        self.hide()
+
+    # ── Fetch ─────────────────────────────────────────────────────────────────
+    def _fetch(self):
         class _Fetcher(QtCore.QThread):
             result = QtCore.pyqtSignal(str)
-
             def run(self_inner):
                 try:
                     import urllib.request
@@ -2226,23 +2955,19 @@ class AnnouncementBanner(QWidget):
                         text = resp.read().decode("utf-8", errors="replace").strip()
                     self_inner.result.emit(text)
                 except Exception:
-                    self_inner.result.emit("")   # silently hide on any error
-
+                    self_inner.result.emit("")
         self._fetcher = _Fetcher()
         self._fetcher.result.connect(self._on_fetched)
         self._fetcher.start()
 
     def _on_fetched(self, text: str):
         if not text:
-            return          # keep banner hidden
+            return
         self._lbl.setText(text)
-        self._lbl.adjustSize()
-        needed = max(self._lbl.sizeHint().height() + 8, 28)
-        self.setFixedHeight(min(needed, 54))
-        self.update()
-
-    def _dismiss(self):
-        self.setFixedHeight(0)
+        self._reposition()
+        self.raise_()
+        self.show()
+        self._timer.start()
 
 
 class MainWindow(QWidget):
@@ -2268,23 +2993,137 @@ class MainWindow(QWidget):
             print(f"[icon] Could not load icon: {e}")
 
     def _build_ui(self):
-        from PyQt5.QtWidgets import QSplitter
+        from PyQt5.QtWidgets import QSplitter, QTabWidget
         from PyQt5.QtCore import Qt as _Qt
 
-        # ── Announcement banner (async fetch from tubeo5866.github.io) ────────
+        # ── Announcement banner — floating pill overlay ───────────────────────
         self._announcement_banner = AnnouncementBanner(self)
 
-        # Outer vertical layout: banner on top, rest of UI below
+        # Outer vertical layout (banner is NOT in the layout — it floats above)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        outer.addWidget(self._announcement_banner)
 
-        # Inner container holds the original horizontal splitter layout
+        _tab_style = """
+            QTabWidget::pane {
+                border: 1px solid #444;
+                border-top: none;
+                background: transparent;
+            }
+            QTabBar::tab {
+                background: #2a2a2a;
+                color: #aaa;
+                padding: 8px 22px;
+                min-width: 80px;
+                border: 1px solid #444;
+                border-bottom: none;
+                border-radius: 4px 4px 0 0;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QTabBar::tab:selected {
+                background: #1a1a2e;
+                color: #7ec8e3;
+                border-bottom: 2px solid #7ec8e3;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #333;
+                color: #ccc;
+            }
+            QTabBar {
+                qproperty-expanding: 1;
+            }
+        """
+
+        # ── Outer tabs: Bedrock Edition | Java Edition + Settings gear ──────────
+        self._outer_tab_widget = QTabWidget()
+        self._outer_tab_widget.setTabPosition(QTabWidget.North)
+        self._outer_tab_widget.setStyleSheet(_tab_style)
+        self._outer_tab_widget.currentChanged.connect(self._on_outer_tab_changed)
+
+        # Build / Cancel button — lives in the outer tab bar row
+        self.btn_run = QPushButton("Build mcpack\n(Bedrock / HorizonUI)")
+        self.btn_run.clicked.connect(self.run_process)
+        self.btn_run.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.btn_run.setFixedWidth(180)
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setVisible(False)
+        self.btn_cancel.clicked.connect(self.cancel_process)
+        self.btn_cancel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.btn_cancel.setFixedWidth(180)
+
+        # Settings button — corner of the inner tab row
+        self._btn_settings = QPushButton("Settings")
+        self._btn_settings.setToolTip("Options & About")
+        self._btn_settings.clicked.connect(self._show_settings_menu)
+
+        self._outer_tab_widget.tabBar().setExpanding(True)
+
+        # ── Inner tabs for each edition (HorizonUI | NekoUI) ──────────────────
+        self._bedrock_tab_widget = QTabWidget()
+        self._bedrock_tab_widget.setTabPosition(QTabWidget.North)
+        self._bedrock_tab_widget.setStyleSheet(_tab_style)
+        self._bedrock_tab_widget.currentChanged.connect(self._on_tab_changed)
+        self._bedrock_tab_widget.tabBar().setExpanding(True)
+
+        self._java_tab_widget = QTabWidget()
+        self._java_tab_widget.setTabPosition(QTabWidget.North)
+        self._java_tab_widget.setStyleSheet(_tab_style)
+        self._java_tab_widget.currentChanged.connect(self._on_tab_changed)
+        self._java_tab_widget.tabBar().setExpanding(True)
+
+        for inner in (self._bedrock_tab_widget, self._java_tab_widget):
+            for label in ("HorizonUI", "NekoUI"):
+                w = QWidget()
+                QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
+                inner.addTab(w, label)
+
+        self._bedrock_tab_widget.setCornerWidget(self._btn_settings, Qt.TopRightCorner)
+
+        bedrock_outer = QWidget()
+        bedrock_vbox  = QVBoxLayout(bedrock_outer)
+        bedrock_vbox.setContentsMargins(0, 0, 0, 0)
+        bedrock_vbox.setSpacing(0)
+        bedrock_vbox.addWidget(self._bedrock_tab_widget)
+
+        java_outer = QWidget()
+        java_vbox  = QVBoxLayout(java_outer)
+        java_vbox.setContentsMargins(0, 0, 0, 0)
+        java_vbox.setSpacing(0)
+        java_vbox.addWidget(self._java_tab_widget)
+
+        self._outer_tab_widget.addTab(bedrock_outer, "Bedrock Edition")
+        self._outer_tab_widget.addTab(java_outer,    "Java Edition")
+
+        # ── Tab area + Build button side by side ──────────────────────────────
+        tab_build_row = QWidget()
+        tab_build_h   = QHBoxLayout(tab_build_row)
+        tab_build_h.setContentsMargins(0, 0, 0, 0)
+        tab_build_h.setSpacing(0)
+        tab_build_h.addWidget(self._outer_tab_widget, stretch=1)
+
+        # Stack Build and Cancel on top of each other in a fixed-width column
+        build_col = QWidget()
+        build_col.setFixedWidth(184)
+        build_col_v = QVBoxLayout(build_col)
+        build_col_v.setContentsMargins(4, 2, 4, 2)
+        build_col_v.setSpacing(0)
+        build_col_v.addWidget(self.btn_run)
+        build_col_v.addWidget(self.btn_cancel)
+        tab_build_h.addWidget(build_col)
+
+        outer.addWidget(tab_build_row)
+
+        # Shared inner container (splitter + form) — used for ALL 4 tab combos
         inner_container = QWidget()
+        inner_container.setObjectName("inner_container")
         root = QHBoxLayout(inner_container)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
+
+        outer.addWidget(inner_container, stretch=1)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -2334,7 +3173,14 @@ class MainWindow(QWidget):
             r += 1
 
         _sec("OUTPUT")
-        self.inp_output = QLineEdit(str(Path.home() / "HorizonExtensions"))
+
+        # Load pack button — load metadata from existing .mcpack/.zip
+        btn_load_pack = QPushButton("Load from .mcpack / .zip…")
+        btn_load_pack.setToolTip("Load an existing pack to pre-fill extension name, version, creator, and detect edition/UI type")
+        btn_load_pack.clicked.connect(self._load_pack_from_file)
+        g.addWidget(btn_load_pack, r, 0, 1, 3); r += 1
+
+        self.inp_output = QLineEdit(str(Path.home() / "UI_Extensions"))
         btn_o = QPushButton("Browse…"); btn_o.clicked.connect(self.browse_output)
         _row("Output Folder:", self.inp_output, btn_o)
 
@@ -2345,7 +3191,10 @@ class MainWindow(QWidget):
         _row("Extension Name:", self.inp_packname, btn_fmt)
 
         self.inp_creator = QLineEdit("Unknown")
-        _row("Creator Name:", self.inp_creator)
+        btn_fmt_creator = QPushButton("Format…")
+        btn_fmt_creator.setToolTip("Insert Minecraft § colour / style codes into the creator name")
+        btn_fmt_creator.clicked.connect(lambda: self._open_format_dialog(self.inp_creator))
+        _row("Creator Name:", self.inp_creator, btn_fmt_creator)
 
         self.inp_pack_icon = QLineEdit()
         self.inp_pack_icon.setPlaceholderText("(optional) Select a PNG file")
@@ -2446,12 +3295,12 @@ class MainWindow(QWidget):
 
         self.spn_ver_x = QSpinBox()
         self.spn_ver_x.setRange(0, 99999)
-        self.spn_ver_x.setValue(201)
+        self.spn_ver_x.setValue(1)
         self.spn_ver_x.setFixedWidth(70)
         self.spn_ver_x.setAlignment(Qt.AlignCenter)
 
         self.spn_ver_y = _make_ver_spin()
-        self.spn_ver_y.setValue(1)
+        self.spn_ver_y.setValue(0)
 
         self.spn_ver_z = _make_ver_spin()
 
@@ -2475,24 +3324,64 @@ class MainWindow(QWidget):
         src_type_widget = QWidget()
         src_type_hbox = QHBoxLayout(src_type_widget)
         src_type_hbox.setContentsMargins(0, 0, 0, 0)
-        self.rdo_src_video = QRadioButton("Video / YouTube")
-        self.rdo_src_image = QRadioButton("Image")
+        self.rdo_src_video   = QRadioButton("Video")
+        self.rdo_src_youtube = QRadioButton("YouTube Video")
+        self.rdo_src_image   = QRadioButton("Image")
         self.rdo_src_video.setChecked(True)
         self._src_type_group = QButtonGroup(self)
-        self._src_type_group.addButton(self.rdo_src_video, 0)
-        self._src_type_group.addButton(self.rdo_src_image, 1)
+        self._src_type_group.addButton(self.rdo_src_video,   0)
+        self._src_type_group.addButton(self.rdo_src_youtube, 1)
+        self._src_type_group.addButton(self.rdo_src_image,   2)
         src_type_hbox.addWidget(self.rdo_src_video)
+        src_type_hbox.addWidget(self.rdo_src_youtube)
         src_type_hbox.addWidget(self.rdo_src_image)
         src_type_hbox.addStretch()
         _row("Source Type:", src_type_widget)
 
         self.inp_video = QLineEdit()
-        self.inp_video.setPlaceholderText("Local file or YouTube URL")
+        self.inp_video.setPlaceholderText("Local video file path")
         self._btn_browse_video = QPushButton("Browse…"); self._btn_browse_video.clicked.connect(self.browse_video)
-        self._lbl_video = QLabel("Video / YouTube URL:")
+        self._lbl_video = QLabel("Video File:")
         g.addWidget(self._lbl_video, r, 0)
         g.addWidget(self.inp_video, r, 1)
         g.addWidget(self._btn_browse_video, r, 2)
+        r += 1
+
+        self.inp_yt_url = QLineEdit()
+        self.inp_yt_url.setPlaceholderText("https://youtu.be/...")
+        self._lbl_yt_url = QLabel("YouTube URL:")
+        g.addWidget(self._lbl_yt_url, r, 0)
+        g.addWidget(self.inp_yt_url, r, 1, 1, 2)
+        r += 1
+
+        # YouTube cookies browser field
+        self.inp_yt_cookies = QLineEdit()
+        self.inp_yt_cookies.setPlaceholderText("e.g. chrome, firefox, edge…")
+        self._lbl_yt_cookies = QLabel("Cookies Browser:")
+
+        yt_cookies_help = QLabel('<a href="#">?</a>')
+        yt_cookies_help.setToolTip(
+            "YouTube requires cookies to avoid bot detection (HTTP 429).\n"
+            "Enter your browser name (chrome, firefox, edge, brave…)\n"
+            "so yt-dlp can read cookies automatically.\n\n"
+            "Click to open documentation:"
+        )
+        yt_cookies_help.setFixedWidth(16)
+        yt_cookies_help.setAlignment(Qt.AlignCenter)
+        def _open_yt_docs(_event):
+            __import__('webbrowser').open('https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp')
+            __import__('webbrowser').open('https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies')
+        yt_cookies_help.mousePressEvent = _open_yt_docs
+
+        self._yt_cookies_row = QWidget()
+        yt_cookies_h = QHBoxLayout(self._yt_cookies_row)
+        yt_cookies_h.setContentsMargins(0, 0, 0, 0)
+        yt_cookies_h.setSpacing(4)
+        yt_cookies_h.addWidget(self.inp_yt_cookies, stretch=1)
+        yt_cookies_h.addWidget(yt_cookies_help)
+
+        g.addWidget(self._lbl_yt_cookies, r, 0)
+        g.addWidget(self._yt_cookies_row, r, 1, 1, 2)
         r += 1
 
         self.inp_image_src = QLineEdit()
@@ -2522,39 +3411,90 @@ class MainWindow(QWidget):
         g.addWidget(self.spn_fps, r, 1, 1, 2)
         r += 1
 
-        self.spn_anim_frames = QSpinBox(); self.spn_anim_frames.setRange(1, 9999); self.spn_anim_frames.setValue(100)
+        # Anim Frames — auto-calculated, read-only display
         self._lbl_anim_frames = QLabel("Anim Frames:")
+        self._anim_frames_lbl = QLabel("600")
+        self._anim_frames_lbl.setStyleSheet("color:#7ec8e3; font-size:10px;")
+        self._anim_frames_lbl.setToolTip("Auto-calculated: (End Time − Start Time) × Extract FPS")
         g.addWidget(self._lbl_anim_frames, r, 0)
-        g.addWidget(self.spn_anim_frames, r, 1, 1, 2)
-        r += 1
-
-        self.spn_load_frames = QSpinBox(); self.spn_load_frames.setRange(1, 9999); self.spn_load_frames.setValue(100)
-        self._lbl_load_frames = QLabel("Loading Frames:")
-        g.addWidget(self._lbl_load_frames, r, 0)
-        g.addWidget(self.spn_load_frames, r, 1, 1, 2)
+        g.addWidget(self._anim_frames_lbl, r, 1, 1, 2)
         r += 1
 
         self.rdo_src_video.toggled.connect(self._toggle_source_type)
-        self._toggle_source_type(True)
-        _sec("ASSETS")
+        self.rdo_src_youtube.toggled.connect(self._toggle_source_type)
+        self.rdo_src_image.toggled.connect(self._toggle_source_type)
+        self.inp_start.textChanged.connect(self._update_anim_frames_label)
+        self.inp_end.textChanged.connect(self._update_anim_frames_label)
+        self.spn_fps.valueChanged.connect(self._update_anim_frames_label)
+        self._toggle_source_type()
+        self._update_anim_frames_label()
+
+        # ASSETS section header — stored so it can be hidden in Java Edition
+        self._sep_assets = QFrame(); self._sep_assets.setFrameShape(QFrame.HLine)
+        self._sep_assets.setStyleSheet("color:#444;")
+        g.addWidget(self._sep_assets, r, 0, 1, 3); r += 1
+        self._lbl_sec_assets = QLabel("ASSETS")
+        self._lbl_sec_assets.setStyleSheet("font-weight:bold;color:#888;font-size:10px;padding-top:2px;")
+        g.addWidget(self._lbl_sec_assets, r, 0, 1, 3); r += 1
+
+        # Custom Container Background
+        self._container_bg_images: dict = {fname: {"pil": None, "path": ""} for _, fname in CONTAINER_BG_SLOTS}
+        self._lbl_container_bg       = QLabel("Custom Container Background:")
+        self._container_bg_count_lbl = QLabel("0 custom")
+        self._container_bg_count_lbl.setStyleSheet("color:#888; font-size:10px;")
+        self._btn_container_bg_edit  = QPushButton("Edit")
+        self._btn_container_bg_edit.setFixedWidth(120)
+        self._btn_container_bg_edit.clicked.connect(self._open_container_bg_dialog)
+        self._container_bg_row = QWidget()
+        container_bg_h   = QHBoxLayout(self._container_bg_row)
+        container_bg_h.setContentsMargins(0, 0, 0, 0)
+        container_bg_h.setSpacing(6)
+        container_bg_h.addWidget(self._container_bg_count_lbl)
+        container_bg_h.addStretch()
+        g.addWidget(self._lbl_container_bg, r, 0)
+        g.addWidget(self._container_bg_row, r, 1)
+        g.addWidget(self._btn_container_bg_edit, r, 2)
+        r += 1
         self.inp_bgm = QLineEdit()
         self.inp_bgm.setPlaceholderText("(optional — leave blank to extract from video)")
         self.inp_bgm.setToolTip(
             "Pick an audio file (.ogg, .mp3, .wav, .flac, .m4a, .aac…).\nIf not .ogg, auto-converted to Vorbis OGG.\nLeave blank to extract audio from video."
         )
-        btn_bgm = QPushButton("Browse…"); btn_bgm.clicked.connect(self.browse_bgm)
-        _row("Background Music File:", self.inp_bgm, btn_bgm)
+        self._btn_bgm = QPushButton("Browse…"); self._btn_bgm.clicked.connect(self.browse_bgm)
+        self._lbl_bgm = QLabel("Background Music File:")
+        g.addWidget(self._lbl_bgm, r, 0)
+        g.addWidget(self.inp_bgm, r, 1)
+        g.addWidget(self._btn_bgm, r, 2)
+        r += 1
 
         self.inp_loading_bg = QLineEdit()
-        self.inp_loading_bg.setPlaceholderText("(optional — leave blank to use video frames)")
+        self.inp_loading_bg.setPlaceholderText("← leave blank to use a black frame")
         self.inp_loading_bg.setToolTip(
-            "Optional: folder with images for loading screen.\nNumeric filenames → copied as-is.\nOther names → reorder dialog appears.\nLeave blank to extract frames from video."
+            "Optional: select a folder of images for the loading screen.\n"
+            "Leave blank → a single black frame is used automatically."
         )
-        btn_lbg = QPushButton("Browse…"); btn_lbg.clicked.connect(self.browse_loading_bg)
-        _row("Loading Background Folder:", self.inp_loading_bg, btn_lbg)
+        self._btn_lbg = QPushButton("Browse Folder…")
+        self._btn_lbg.clicked.connect(self.browse_loading_bg)
 
-        self.inp_loading_bg.textChanged.connect(self._toggle_load_frames_row)
-        self._toggle_load_frames_row("")
+        btn_lbg_clear = QPushButton("✖")
+        btn_lbg_clear.setFixedWidth(26)
+        btn_lbg_clear.setToolTip("Clear — use black frame")
+        btn_lbg_clear.clicked.connect(lambda: self.inp_loading_bg.clear())
+
+        lbg_btn_group = QWidget()
+        lbg_btn_h = QHBoxLayout(lbg_btn_group)
+        lbg_btn_h.setContentsMargins(0, 0, 0, 0)
+        lbg_btn_h.setSpacing(2)
+        lbg_btn_h.addWidget(self._btn_lbg)
+        lbg_btn_h.addWidget(btn_lbg_clear)
+
+        self._lbl_loading_bg = QLabel("Loading Background:")
+        g.addWidget(self._lbl_loading_bg, r, 0)
+        g.addWidget(self.inp_loading_bg, r, 1)
+        g.addWidget(lbg_btn_group, r, 2)
+        r += 1
+
+        self.inp_loading_bg.textChanged.connect(self._dummy_load_frames_compat)
 
         _sec("COMPRESSION")
         self.cmb_compress = QComboBox()
@@ -2666,29 +3606,6 @@ class MainWindow(QWidget):
         )
         left_vbox.addWidget(self.progress_bar)
 
-        btn_bar = QHBoxLayout()
-        btn_bar.setContentsMargins(4, 2, 4, 4)
-        self.btn_request_feature = QPushButton("✨  Request a Feature")
-        self.btn_request_feature.setToolTip("Request a new feature")
-        self.btn_request_feature.clicked.connect(lambda: __import__('webbrowser').open("https://forms.gle/KTJQCq8EdseQhFKp9"))
-
-        self.btn_run = QPushButton("▶  Build mcpack")
-        self.btn_run.clicked.connect(self.run_process)
-
-        self.btn_cancel = QPushButton("✖  Cancel")
-        self.btn_cancel.setEnabled(False)
-        self.btn_cancel.clicked.connect(self.cancel_process)
-
-        self.btn_help = QPushButton("?  CLI Help")
-        self.btn_help.setToolTip("Show command-line interface help")
-        self.btn_help.clicked.connect(self.show_cli_help)
-
-        btn_bar.addWidget(self.btn_request_feature, stretch=2)
-        btn_bar.addWidget(self.btn_run, stretch=3)
-        btn_bar.addWidget(self.btn_cancel, stretch=1)
-        btn_bar.addWidget(self.btn_help, stretch=1)
-        left_vbox.addLayout(btn_bar)
-
         splitter.addWidget(left_outer)
 
         right_widget = QWidget()
@@ -2716,7 +3633,7 @@ class MainWindow(QWidget):
             "ⓘ This script is licensed under GNU v3 License."
             "</span><br>"
             "<span style='color:#666;font-size:10px;'>"
-            "Made with love for HorizonUI Extension Makers!"
+            "Made with ♥ for Hans Community!"
             "</span>"
         )
         self.lbl_status.setWordWrap(True)
@@ -2727,19 +3644,92 @@ class MainWindow(QWidget):
 
         splitter.addWidget(right_widget)
         splitter.setSizes([520, 360])
-        # Add the inner_container (splitter + all controls) below the banner
-        outer.addWidget(inner_container, stretch=1)
+
+    def _current_edition(self) -> str:
+        """Returns 'bedrock' or 'java'."""
+        return "java" if self._outer_tab_widget.currentIndex() == 1 else "bedrock"
+
+    def _current_ui_mode(self) -> str:
+        """Returns 'horizon', 'neko' based on the active inner tab."""
+        inner = (self._java_tab_widget if self._current_edition() == "java"
+                 else self._bedrock_tab_widget)
+        return "neko" if inner.currentIndex() == 1 else "horizon"
+
+    def _toggle_java_fields(self):
+        """Hide BGM, Loading BG, ASSETS section, and Container BG when Java Edition is active."""
+        if not hasattr(self, "_sep_assets"):
+            return
+        is_java = (self._current_edition() == "java")
+        for w in (self._sep_assets, self._lbl_sec_assets,
+                  self._lbl_container_bg, self._container_bg_row, self._btn_container_bg_edit,
+                  self._lbl_bgm, self.inp_bgm, self._btn_bgm,
+                  self._lbl_loading_bg, self.inp_loading_bg, self._btn_lbg):
+            w.setVisible(not is_java)
+
+    def _open_container_bg_dialog(self):
+        dlg = ContainerBgDialog(self._container_bg_images, parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            # slot_data is mutated in-place by dlg._apply()
+            n = sum(1 for v in self._container_bg_images.values()
+                    if v and v.get("pil") is not None)
+            self._container_bg_count_lbl.setText(f"{n} custom" if n else "0 custom")
+            self._container_bg_count_lbl.setStyleSheet(
+                ("color:#7ec8e3;" if n else "color:#888;") + " font-size:10px;"
+            )
+
+    def _on_outer_tab_changed(self, _index: int):
+        if not hasattr(self, "btn_run"):
+            return
+        # Move Settings button to the currently-visible inner tab bar
+        inner = (self._java_tab_widget if self._current_edition() == "java"
+                 else self._bedrock_tab_widget)
+        inner.setCornerWidget(self._btn_settings, Qt.TopRightCorner)
+        self._btn_settings.show()
+        self._toggle_java_fields()
+        self._update_build_button()
+
+    def _on_tab_changed(self, _index: int):
+        """Called when either inner tab widget changes."""
+        if not hasattr(self, "btn_run"):
+            return
+        self._update_build_button()
+
+    def _update_build_button(self):
+        edition = self._current_edition()
+        ui_mode = self._current_ui_mode()
+        if edition == "java":
+            line1 = "Build zip"
+            line2 = f"Java / {'NekoUI' if ui_mode == 'neko' else 'HorizonUI'}"
+        else:
+            line1 = "Build mcpack"
+            line2 = f"Bedrock / {'NekoUI' if ui_mode == 'neko' else 'HorizonUI'}"
+        self.btn_run.setText(f"{line1}\n({line2})")
 
     def _open_format_dialog(self, target_field: "QLineEdit"):
         dlg = McFormatDialog(target_field, parent=self)
         dlg.exec_()
 
-    def _toggle_load_frames_row(self, text: str):
-        """Show Loading Frames spinbox only when no Loading BG folder is set and source is video."""
-        is_video = self.rdo_src_video.isChecked()
-        visible = is_video and not text.strip()
-        self._lbl_load_frames.setVisible(visible)
-        self.spn_load_frames.setVisible(visible)
+    def _update_anim_frames_label(self, *_):
+        """Recompute Anim Frames = (End - Start) * FPS and update the label."""
+        if not hasattr(self, "_anim_frames_lbl"):
+            return
+        try:
+            start = Worker.parse_time(self.inp_start.text().strip()) or 0
+            end   = Worker.parse_time(self.inp_end.text().strip())   or 30
+            fps   = self.spn_fps.value()
+            n = max(1, int((end - start) * fps))
+            self._anim_frames_lbl.setText(str(n))
+            self._anim_frames_lbl.setStyleSheet("color:#7ec8e3; font-size:10px;")
+        except Exception:
+            self._anim_frames_lbl.setText("?")
+            self._anim_frames_lbl.setStyleSheet("color:#e07070; font-size:10px;")
+
+    def _dummy_load_frames_compat(self, *_):
+        pass
+
+    def _toggle_load_frames_row(self, *_):
+        """No-op — Loading Frames row removed."""
+        pass
 
     def browse_video(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select Video", filter="Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)")
@@ -2753,25 +3743,154 @@ class MainWindow(QWidget):
         if f: self.inp_image_src.setText(f)
 
     def _toggle_source_type(self, _checked=None):
-        """Show/hide rows depending on whether Video or Image source is chosen."""
-        is_video = self.rdo_src_video.isChecked()
-        for w in (self._lbl_video, self.inp_video, self._btn_browse_video,
-                  self._lbl_start, self.inp_start,
+        """Show/hide rows depending on source type (Video / YouTube / Image)."""
+        is_video   = self.rdo_src_video.isChecked()
+        is_youtube = self.rdo_src_youtube.isChecked()
+        is_image   = self.rdo_src_image.isChecked()
+        is_video_like = is_video or is_youtube  # both show time/fps/frames
+
+        for w in (self._lbl_video, self.inp_video, self._btn_browse_video):
+            w.setVisible(is_video)
+        for w in (self._lbl_yt_url, self.inp_yt_url,
+                  self._lbl_yt_cookies, self._yt_cookies_row):
+            w.setVisible(is_youtube)
+        for w in (self._lbl_image_src, self.inp_image_src, self._btn_browse_image):
+            w.setVisible(is_image)
+        for w in (self._lbl_start, self.inp_start,
                   self._lbl_end, self.inp_end,
                   self._lbl_fps, self.spn_fps,
-                  self._lbl_anim_frames, self.spn_anim_frames):
-            w.setVisible(is_video)
-        for w in (self._lbl_image_src, self.inp_image_src, self._btn_browse_image):
-            w.setVisible(not is_video)
+                  self._lbl_anim_frames, self._anim_frames_lbl):
+            w.setVisible(is_video_like)
         if hasattr(self, "rdo_static"):
-            self.rdo_static.setEnabled(is_video)
-            self.rdo_both.setEnabled(is_video)
-            if not is_video and not self.rdo_dynamic.isChecked():
-                self.rdo_dynamic.setChecked(True)
-        if hasattr(self, "inp_loading_bg"):
-            has_loading_folder = self.inp_loading_bg.text().strip()
-            self._lbl_load_frames.setVisible(is_video and not has_loading_folder)
-            self.spn_load_frames.setVisible(is_video and not has_loading_folder)
+            self.rdo_dynamic.setEnabled(is_video_like)
+            self.rdo_both.setEnabled(is_video_like)
+            if is_image:
+                self.rdo_static.setChecked(True)
+
+    def _load_pack_from_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Pack File",
+            filter="Pack Files (*.mcpack *.zip);;All Files (*)"
+        )
+        if not path:
+            return
+
+        try:
+            self._do_load_pack(Path(path))
+        except Exception as e:
+            QMessageBox.warning(self, "Load Failed", f"Could not load pack:\n{e}")
+
+    def _do_load_pack(self, pack_path: Path):
+        import zipfile as _zf
+        import json as _json
+
+        if not _zf.is_zipfile(str(pack_path)):
+            raise ValueError("File is not a valid ZIP/mcpack archive.")
+
+        with _zf.ZipFile(str(pack_path), "r") as zf:
+            names = zf.namelist()
+
+            # ── Detect edition & UI type ───────────────────────────────────────
+            has_manifest   = any(n.endswith("manifest.json") and n.count("/") == 0 for n in names)
+            has_mcmeta     = any(n.endswith("pack.mcmeta")   and n.count("/") == 0 for n in names)
+            has_horizon    = any("hrzn_animated_background" in n for n in names)
+            has_neko_anim  = any("neko_ui_public_animated_background" in n for n in names)
+            has_java_bg    = any("assets/nekoui/background" in n for n in names)
+
+            is_java        = has_mcmeta or has_java_bg
+            is_neko        = has_neko_anim or (has_java_bg)
+
+            # ── Read metadata ─────────────────────────────────────────────────
+            name    = ""
+            creator = ""
+            ver     = [1, 0, 0]
+
+            if has_manifest and not is_java:
+                raw = zf.read("manifest.json").decode("utf-8", errors="replace")
+                data = _json.loads(raw)
+                hdr  = data.get("header", {})
+                raw_name = hdr.get("name", "")
+                # Strip Minecraft formatting codes §x
+                name = re.sub(r"§.", "", raw_name)
+                # Strip known UI prefixes
+                for prefix in ("HorizonUI: ", "NekoUI: ", "Horizon UI: ", "Neko UI: "):
+                    if name.startswith(prefix):
+                        name = name[len(prefix):]
+                        break
+                ver_list = hdr.get("version", [1, 0, 0])
+                ver = [int(v) for v in ver_list[:3]]
+                # Try to get creator from module description
+                desc = hdr.get("description", "")
+                m = re.search(r"Extension Creator\s*:\s*(.+)", desc)
+                if m:
+                    creator = m.group(1).strip()
+
+            elif has_mcmeta and is_java:
+                raw  = zf.read("pack.mcmeta").decode("utf-8", errors="replace")
+                data = _json.loads(raw)
+                desc = data.get("pack", {}).get("description", "")
+                # Format: "§fNekoUI AB - {name} (v{x}.{y}.{z}) - by {creator}"
+                m = re.search(r"NekoUI AB\s*-\s*(.+?)\s*\(v(\d+)\.(\d+)\.(\d+)\)\s*-\s*by\s*(.+)", desc)
+                if m:
+                    name    = m.group(1).strip()
+                    ver     = [int(m.group(2)), int(m.group(3)), int(m.group(4))]
+                    creator = m.group(5).strip()
+                else:
+                    # Fallback: strip formatting and use as name
+                    name = re.sub(r"§.", "", desc).strip()
+
+            # ── Count frames ──────────────────────────────────────────────────
+            _IMG = {".png", ".jpg", ".jpeg", ".webp"}
+            if is_java:
+                anim_frames = sum(1 for n in names
+                    if "assets/nekoui/background" in n
+                    and Path(n).suffix.lower() in _IMG)
+            elif is_neko:
+                anim_frames = sum(1 for n in names
+                    if "neko_ui_public_animated_background/" in n
+                    and Path(n).suffix.lower() in _IMG
+                    and "blur" not in Path(n).name)
+            else:
+                anim_frames = sum(1 for n in names
+                    if "hrzn_animated_background/" in n
+                    and Path(n).suffix.lower() in _IMG
+                    and "blur" not in Path(n).name)
+
+        # ── Apply to form ─────────────────────────────────────────────────────
+        if name:
+            self.inp_packname.setText(name)
+        if creator:
+            self.inp_creator.setText(creator)
+        self.spn_ver_x.setValue(ver[0])
+        self.spn_ver_y.setValue(ver[1])
+        self.spn_ver_z.setValue(ver[2])
+
+        # Switch to correct edition tab
+        if is_java:
+            self._outer_tab_widget.setCurrentIndex(1)
+        else:
+            self._outer_tab_widget.setCurrentIndex(0)
+
+        # Switch to correct UI tab
+        inner = self._java_tab_widget if is_java else self._bedrock_tab_widget
+        inner.setCurrentIndex(1 if is_neko else 0)
+
+        # Build summary
+        edition_str = "Java Edition" if is_java else "Bedrock Edition"
+        ui_str      = "NekoUI" if is_neko else "HorizonUI"
+        frames_str  = f"{anim_frames} anim frame(s) detected" if anim_frames else "no frames detected"
+        QMessageBox.information(
+            self, "Pack Loaded",
+            f"Loaded: {pack_path.name}\n\n"
+            f"Edition : {edition_str}\n"
+            f"UI Type : {ui_str}\n"
+            f"Name    : {name or '(unknown)'}\n"
+            f"Creator : {creator or '(unknown)'}\n"
+            f"Version : {ver[0]}.{ver[1]}.{ver[2]}\n"
+            f"Frames  : {frames_str}\n\n"
+            "Note: source video/image is not restored.\n"
+            "You can edit metadata and rebuild."
+        )
 
     def browse_output(self):
         d = QFileDialog.getExistingDirectory(self, "Select Output Folder")
@@ -2840,15 +3959,34 @@ class MainWindow(QWidget):
         self.log_box.moveCursor(QtGui.QTextCursor.End)
 
     def run_process(self):
-        is_image_mode = self.rdo_src_image.isChecked()
-        video = (self.inp_image_src.text().strip() if is_image_mode
-                 else self.inp_video.text().strip())
+        is_image_mode   = self.rdo_src_image.isChecked()
+        is_youtube_mode = self.rdo_src_youtube.isChecked()
+
+        if is_image_mode:
+            video = self.inp_image_src.text().strip()
+        elif is_youtube_mode:
+            video = self.inp_yt_url.text().strip()
+        else:
+            video = self.inp_video.text().strip()
+
         output = self.inp_output.text().strip()
-        name = self.inp_packname.text().strip()
+        name   = self.inp_packname.text().strip()
 
         if not video or not output or not name:
             QMessageBox.warning(self, "Missing Fields",
                 "Please fill in Source, Output Folder, and Extension Name.")
+            return
+
+        if is_youtube_mode and not self.inp_yt_cookies.text().strip():
+            QMessageBox.warning(self, "Missing Fields",
+                "YouTube Cookies Browser is required for YouTube sources.\n"
+                "Enter your browser name (e.g. chrome, firefox, edge).")
+            return
+
+        if is_image_mode and not self.inp_bgm.text().strip() and self._current_edition() != "java":
+            QMessageBox.warning(self, "Missing Fields",
+                "Background Music File is required when using an image source.\n"
+                "Please select a BGM file.")
             return
 
         if not is_image_mode:
@@ -2864,8 +4002,10 @@ class MainWindow(QWidget):
             end   = None
 
         cfg = {
-            "video_path":       video,
-            "source_is_image":  is_image_mode,
+            "video_path":           video,
+            "source_is_image":      is_image_mode,
+            "source_is_youtube":    is_youtube_mode,
+            "yt_cookies_browser":   self.inp_yt_cookies.text().strip() if is_youtube_mode else "",
             "output_folder":    output,
             "new_pack_name":    name,
             "creator":          self.inp_creator.text().strip(),
@@ -2874,8 +4014,9 @@ class MainWindow(QWidget):
             "start_seconds":    start,
             "end_seconds":      end,
             "fps":              self.spn_fps.value(),
-            "anim_frames":      self.spn_anim_frames.value(),
-            "load_frames":      self.spn_load_frames.value(),
+            "anim_frames":      max(1, int(self._anim_frames_lbl.text()) if self._anim_frames_lbl.text().isdigit() else 100),
+            "load_frames":      1,
+            "use_black_loading": not self.inp_loading_bg.text().strip(),
             "compress_method":  self.cmb_compress.currentText(),
             "tinify_key":       self.inp_tinify.text().strip(),
             "kraken_key":       self.inp_kraken.text().strip(),
@@ -2892,6 +4033,7 @@ class MainWindow(QWidget):
             "ffmpeg_qv":        self.spn_ff_qv.value(),
             "pillow_quality":   self.cmb_pillow_q.currentText().lower(),
             "loading_bg_folder": self.inp_loading_bg.text().strip(),
+            "container_bg_images": self._container_bg_images,
             "pack_icon_pil":    self._pack_icon_pil,
             "pack_icon_path":   self._pack_icon_path,
             "ext_ver_x":        self.spn_ver_x.value(),
@@ -2902,16 +4044,27 @@ class MainWindow(QWidget):
                                  else "dynamic"),
         }
 
-        self.btn_run.setEnabled(False)
+        self.btn_run.setVisible(False)
+        self.btn_cancel.setVisible(True)
         self.btn_cancel.setEnabled(True)
         self._form_widget.setEnabled(False)
         self.progress_bar.setValue(0)
-        self.worker = Worker(cfg)
+        edition = self._current_edition()
+        ui_mode = self._current_ui_mode()
+        if edition == "java":
+            self.worker = JavaWorker(cfg)
+            mode_label  = f"Java / {'NekoUI' if ui_mode == 'neko' else 'HorizonUI'}"
+        elif ui_mode == "neko":
+            self.worker = NekoWorker(cfg)
+            mode_label  = "Bedrock / NekoUI"
+        else:
+            self.worker = Worker(cfg)
+            mode_label  = "Bedrock / HorizonUI"
         self.worker.log_signal.connect(self.append_log)
         self.worker.done_signal.connect(self.on_done)
         self.worker.progress_signal.connect(self.progress_bar.setValue)
         self.worker.show_order_dialog.connect(self._on_show_order_dialog)
-        self.append_log("=== Starting ===")
+        self.append_log(f"=== Starting [{mode_label}] ===")
         self.worker.start()
 
     def _on_show_order_dialog(self, path_strings: list):
@@ -2932,61 +4085,126 @@ class MainWindow(QWidget):
                 self.worker.wait()
                 self.append_log("=== Cancelled ===")
                 self._form_widget.setEnabled(True)
-                self.btn_run.setEnabled(True)
+                self.btn_run.setVisible(True)
+                self.btn_cancel.setVisible(False)
                 self.btn_cancel.setEnabled(False)
 
     def on_done(self, ok: bool, msg: str):
         self.append_log(f"=== {'Done' if ok else 'Error'} ===")
         self._form_widget.setEnabled(True)
-        self.btn_run.setEnabled(True)
+        self.btn_run.setVisible(True)
+        self.btn_cancel.setVisible(False)
         self.btn_cancel.setEnabled(False)
         self.progress_bar.setValue(100 if ok else 0)
+        self._update_build_button()
         (QMessageBox.information if ok else QMessageBox.critical)(self, "Result", msg)
 
-    def show_cli_help(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("CLI Help — horizon_studio.py")
-        dlg.setMinimumSize(680, 500)
-        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 12)
-        layout.setSpacing(8)
-
-        txt = QTextEdit()
-        txt.setReadOnly(True)
-        txt.setFont(__import__("PyQt5.QtGui", fromlist=["QFont"]).QFont(
-            "Courier New" if sys.platform.startswith("win") else "Monospace", 9
-        ))
-        txt.setStyleSheet(
-            "background:#1e1e1e;color:#d4d4d4;"
-            "border:1px solid #444;border-radius:4px;padding:8px;"
+    def _show_settings_menu(self):
+        from PyQt5.QtWidgets import QMenu, QWidgetAction
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { padding: 4px; }"
+            "QMenu::item { padding: 4px 16px; }"
+            "QMenu::item:selected { background: #2a2a3e; }"
         )
 
-        import io, re, os
-        buf = io.StringIO()
-        old_env = os.environ.get("TERM")
-        os.environ["TERM"] = "dumb"
-        try:
-            _build_arg_parser().print_help(buf)
-        finally:
-            if old_env is None:
-                os.environ.pop("TERM", None)
-            else:
-                os.environ["TERM"] = old_env
-        plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf.getvalue())
-        txt.setPlainText(plain)
-        layout.addWidget(txt, stretch=1)
+        # ── Options section ───────────────────────────────────────────────────
+        options_title = QLabel("  Options")
+        options_title.setStyleSheet("font-weight:bold; color:#888; font-size:10px; padding: 2px 8px;")
+        title_action = QWidgetAction(menu)
+        title_action.setDefaultWidget(options_title)
+        menu.addAction(title_action)
 
-        btn_close = QPushButton("Close")
-        btn_close.clicked.connect(dlg.accept)
-        row = __import__("PyQt5.QtWidgets", fromlist=["QHBoxLayout"]).QHBoxLayout()
-        row.addStretch()
-        row.addWidget(btn_close)
-        layout.addLayout(row)
+        self._chk_transparent = QCheckBox("  Enable Window Transparent")
+        _s = _load_settings()
+        self._chk_transparent.setChecked(_s.get("transparent", self.windowOpacity() < 1.0))
+        self._chk_transparent.toggled.connect(self._apply_transparency)
+        act_transparent = QWidgetAction(menu)
+        act_transparent.setDefaultWidget(self._chk_transparent)
+        menu.addAction(act_transparent)
 
+        self._chk_debug = QCheckBox("  Show more DEBUG logs")
+        self._chk_debug.setChecked(_s.get("debug", _IS_DEBUG))
+        self._chk_debug.toggled.connect(self._apply_debug)
+        act_debug = QWidgetAction(menu)
+        act_debug.setDefaultWidget(self._chk_debug)
+        menu.addAction(act_debug)
+
+        menu.addSeparator()
+
+        # ── About ─────────────────────────────────────────────────────────────
+        act_about = menu.addAction("About")
+        act_about.triggered.connect(self._show_about)
+
+        menu.exec_(self._btn_settings.mapToGlobal(
+            self._btn_settings.rect().bottomLeft()
+        ))
+
+    def _apply_transparency(self, checked: bool):
+        self.setWindowOpacity(0.85 if checked else 1.0)
+        s = _load_settings()
+        s["transparent"] = checked
+        _save_settings(s)
+
+    def _apply_debug(self, checked: bool):
+        global _IS_DEBUG
+        _IS_DEBUG = checked
+        s = _load_settings()
+        s["debug"] = checked
+        _save_settings(s)
+
+    def _show_about(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About")
+        dlg.setMinimumSize(420, 280)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(20, 18, 20, 14)
+        outer.setSpacing(10)
+
+        ver = f"{config.get('VERSION', '?')}_{config.get('COMMIT', '?')}"
+        info = QLabel(
+            f"<b>TuBeo5866's HorizonUI/NekoUI Extension Studio</b><br>"
+            f"<span style='color:#888;'>Version {ver}</span><br><br>"
+            f"A GUI tool for building HorizonUI and NekoUI resource pack extensions<br>"
+            f"for Minecraft Bedrock and Java editions.<br><br>"
+            f"<span style='color:#888;'>Made with ♥ by TuBeo5866</span>"
+        )
+        info.setWordWrap(True)
+        info.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        outer.addWidget(info, stretch=1)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color:#444;")
+        outer.addWidget(sep)
+
+        btn_row = QHBoxLayout()
+
+        def _link_btn(label, url):
+            b = QPushButton(label)
+            b.clicked.connect(lambda: __import__('webbrowser').open(url))
+            return b
+
+        btn_row.addWidget(_link_btn("Website",         "https://tubeo5866.com"))
+        btn_row.addWidget(_link_btn("Discord Support",  "https://discord.gg/3fe3ySCJZf"))
+        btn_row.addWidget(_link_btn("Email Support",    "mailto:support@tubeo5866.com"))
+        btn_row.addWidget(_link_btn("Request a Feature", "https://forms.gle/KTJQCq8EdseQhFKp9"))
+        btn_row.addStretch()
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setFixedWidth(70)
+        btn_ok.clicked.connect(dlg.accept)
+        btn_row.addWidget(btn_ok)
+
+        outer.addLayout(btn_row)
         dlg.exec_()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_announcement_banner"):
+            self._announcement_banner._reposition()
+            self._announcement_banner.raise_()
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
             if QMessageBox.question(self, "Exit?", "A process is running. Exit anyway?",
@@ -2997,12 +4215,12 @@ class MainWindow(QWidget):
         else:
             event.accept()
 
-LICENSE_TEXT = """
+LICENSE_TEXT = """\
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║            HORIZON UI EXTENSION STUDIO — TERMS OF USE & LICENSE              ║
+║    TuBeo5866's HorizonUI/NekoUI Extension Studio — TERMS OF USE & LICENSE    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-Last updated: 2025
+Last updated: March 20, 2026
 
 PLEASE READ THESE TERMS CAREFULLY BEFORE USING THIS SOFTWARE.
 By clicking "I Agree" you confirm that you have read, understood, and accept
@@ -3011,15 +4229,16 @@ all terms listed below. If you do not agree, click "Decline" to exit.
 ───────────────────────────────────────────────────────────────────────────────
 1. DEFINITIONS
 ───────────────────────────────────────────────────────────────────────────────
-  • "Software"    — Horizon UI Extension Studio, made by TuBeo5866.
-  • "Extension"   — Any .mcpack file produced by the Software.
-  • "Original UI" — HorizonUI by Han's404 (YouTube: @zxyn404).
+  • "Software"    — TuBeo5866's HorizonUI/NekoUI Extension Studio.
+  • "Extension"   — Any .mcpack or .zip file produced by the Software.
+  • "Original UI" — HorizonUI/NekoUI by Han's404 (YouTube: @zxyn404).
   • "You / User"  — Any individual or entity running the Software.
 
 ───────────────────────────────────────────────────────────────────────────────
 2. GRANT OF LICENSE
 ───────────────────────────────────────────────────────────────────────────────
-  The Software is provided free of charge for personal, non-commercial use.
+  The Software is provided free of charge for personal, non-commercial use,
+  and it's licensed under the GNU General Public License version 3.0.
   You are permitted to:
     (a) Create Extensions for personal use and private distribution.
     (b) Share Extensions freely, PROVIDED the original credit is preserved
@@ -3046,7 +4265,7 @@ all terms listed below. If you do not agree, click "Decline" to exit.
 4. ATTRIBUTION REQUIREMENTS
 ───────────────────────────────────────────────────────────────────────────────
   Every Extension generated by this Software automatically embeds the
-  following credit in its manifest.json and module description:
+  following credit in its configuration and module description:
 
       "Original Creator : Han's404 | Youtube: @zxyn404 ( Han's )"
 
@@ -3090,14 +4309,29 @@ all terms listed below. If you do not agree, click "Decline" to exit.
 ───────────────────────────────────────────────────────────────────────────────
 """
 
-_AGREED_FLAG = Path.home() / ".hrzn_studio_agreed"
+_AGREED_FLAG   = Path.home() / ".tb5866_ext_studio_agreed_license"
+_SETTINGS_FILE = Path.home() / ".tb5866_ext_studio_settings"
+
+
+def _load_settings() -> dict:
+    try:
+        return json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_settings(data: dict):
+    try:
+        _SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[settings] Failed to save: {e}")
 
 def _check_license(app: "QApplication") -> bool:
     if _AGREED_FLAG.exists():
         return True
 
     dlg = QDialog()
-    dlg.setWindowTitle("Horizon UI Extension Studio — Terms of Use")
+    dlg.setWindowTitle("TuBeo5866's HorizonUI/NekoUI Extension Studio — Terms of Use")
     dlg.setMinimumSize(780, 560)
     dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
     dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowCloseButtonHint)
@@ -3208,481 +4442,23 @@ def _check_license(app: "QApplication") -> bool:
     dlg.exec_()
     return dlg._accepted
 
-import argparse
-import textwrap
 
-_CLI_DESCRIPTION = textwrap.dedent("""    Horizon UI Extension Studio — CLI
-    ──────────────────────────────────────────────────────────────────────────
-    Build Minecraft Bedrock .mcpack extensions from a local video, YouTube
-    URL, or a single image file, without opening the graphical interface.
-
-    Sources supported:
-      • Video file (MP4, MOV, MKV, AVI, WEBM …)
-      • YouTube URL
-      • Image file (PNG, JPG, JPEG, WEBP, BMP, TGA) via --image
-
-    Run without any options to launch the full GUI instead.
-""")
-
-_CLI_EPILOG = textwrap.dedent("""    examples:
-      # Interactive mode (recommended for first-time use)
-      curl -fsSL https://hrz-maker.tubeo5866.com | python
-
-      # Non-interactive with a local video
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video myvideo.mp4 --name MyPack --creator Han
-
-      # YouTube URL with time range
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video "https://youtu.be/xxxx" --start 10 --end 40 --name BeachPack
-
-      # With custom BGM and compression
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --compress pillow --pillow-quality high
-
-      # With a loading-background folder
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --loading-bg ./my_screens/
-
-      # With a custom pack icon and version
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --pack-icon icon.png --ext-version 202.1.0
-
-      # Static background
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode static
-
-      # Both (dynamic + static subpack)
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --video clip.mp4 --name CoolPack --bg-mode both
-
-      # Image as background (PNG — used directly)
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --image background.png --name MyPack
-
-      # Image as background (non-PNG — auto-converted)
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --image wallpaper.jpg --name MyPack --bgm bgm.ogg
-
-      # Image with custom loading screens folder
-      curl -fsSL https://hrz-maker.tubeo5866.com | python --image bg.webp --name MyPack --loading-bg ./screens/
-""")
-
-def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="curl -fsSL https://hrz-maker.tubeo5866.com | python",
-        description=_CLI_DESCRIPTION,
-        epilog=_CLI_EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        add_help=False,
-    )
-
-    meta = p.add_argument_group("options")
-    meta.add_argument("-h", "--help",
-                      action="help",
-                      default=argparse.SUPPRESS,
-                      help="show this help message and exit")
-    meta.add_argument("-i", "--interactive",
-                      action="store_true",
-                      help="force interactive prompt mode")
-    meta.add_argument("-q", "--quiet",
-                      action="store_true",
-                      help="suppress detailed log output")
-    meta.add_argument("--skip-bootstrap",
-                      action="store_true",
-                      help="skip automatic tool/package installation check")
-
-    src = p.add_argument_group("source")
-    src.add_argument("--video",
-                     metavar="PATH_OR_URL",
-                     help="local video file or YouTube URL")
-    src.add_argument("--image",
-                     metavar="FILE",
-                     help="use a single image (PNG/JPG/WEBP/BMP/TGA) as the animated background "
-                          "instead of a video. Non-PNG images are auto-converted to PNG.")
-    src.add_argument("--start",
-                     metavar="TIME",
-                     help="start time in seconds or mm:ss  (default: 0)  [video only]")
-    src.add_argument("--end",
-                     metavar="TIME",
-                     help="end time in seconds or mm:ss  (default: 30)  [video only]")
-    src.add_argument("--fps",
-                     metavar="N",
-                     type=int,
-                     default=20,
-                     help="frame extraction FPS  (default: 20)  [video only]")
-    src.add_argument("--anim-frames",
-                     metavar="N",
-                     type=int,
-                     default=100,
-                     help="number of animated background frames, max 100  (default: 100)  [video only]")
-    src.add_argument("--load-frames",
-                     metavar="N",
-                     type=int,
-                     default=100,
-                     help="number of loading background frames, max 100  (default: 100)  [video only]")
-
-    out = p.add_argument_group("output")
-    out.add_argument("--output", "-o",
-                     metavar="DIR",
-                     default=str(Path.home() / "HorizonExtensions"),
-                     help="output directory  (default: ~/HorizonExtensions)")
-    out.add_argument("--name", "-n",
-                     metavar="NAME",
-                     default="MyExtension",
-                     help="extension / pack name  (default: MyExtension)")
-    out.add_argument("--creator", "-c",
-                     metavar="NAME",
-                     default="Unknown",
-                     help="creator name embedded in manifest  (default: Unknown)")
-    out.add_argument("--ext-version",
-                     metavar="X.Y.Z",
-                     default="201.1.0",
-                     help="extension version X.Y.Z embedded in manifest.json  (default: 201.1.0)")
-    out.add_argument("--pack-icon",
-                     metavar="FILE",
-                     help="PNG file used as pack_icon.png in the root of the pack.\n"
-                          "* If the filename is already 'pack_icon' -> copied as-is.\n"
-                          "* Any other name -> resized to 256x256 automatically.\n"
-                          "  In GUI mode a crop & zoom dialog is shown instead.")
-    out.add_argument("--bg-mode",
-                     metavar="MODE",
-                     default="dynamic",
-                     choices=["dynamic", "static", "both"],
-                     help="background build mode (default: dynamic):\n"
-                          "  dynamic — extract N animated frames into hrzn_animated_background\n"
-                          "  static  — 1 frame only into hrzn_animated_background  [video only]\n"
-                          "  both    — dynamic + ./subpacks/static/ (1 frame + JSON)  [video only]")
-
-    assets = p.add_argument_group("assets")
-    assets.add_argument("--bgm",
-                        metavar="FILE",
-                        help="background music file (.ogg/.mp3/.wav/…).\n"
-                             "Omit to extract from video. Skipped in image mode if omitted.")
-    assets.add_argument("--bgm-name",
-                        metavar="NAME",
-                        help="BGM track name used in sound_definitions.json  (default: bgm)")
-    assets.add_argument("--loading-bg",
-                        metavar="DIR",
-                        help="folder of images for loading screen.\n"
-                             "Omit to extract from video.\n"
-                             "In image mode, background image is reused as loading frame if omitted.")
-
-    comp = p.add_argument_group("compression")
-    comp.add_argument("--compress",
-                      metavar="METHOD",
-                      default="lossless",
-                      choices=["lossless", "pillow", "ffmpeg", "tinypng",
-                               "kraken", "imagekit", "cloudinary",
-                               "imagecompressr", "compressor"],
-                      help="compression method:\n"
-                           "lossless | pillow | ffmpeg | tinypng |\n"
-                           "kraken | imagekit | cloudinary | compressor\n"
-                           "(default: lossless)")
-    comp.add_argument("--pillow-quality",
-                      metavar="LEVEL",
-                      choices=["low", "medium", "high", "maximum"],
-                      default="high",
-                      help="{low,medium,high,maximum}")
-    comp.add_argument("--ffmpeg-qv",
-                      metavar="N",
-                      type=int,
-                      default=1,
-                      help="ffmpeg -q:v value 1-31  (default: 1 = best)")
-    comp.add_argument("--tinypng-key",
-                      metavar="KEY",
-                      help="TinyPNG API Key")
-    comp.add_argument("--kraken-key",
-                      metavar="KEY",
-                      help="Kraken.io API Key")
-    comp.add_argument("--kraken-secret",
-                      metavar="SECRET",
-                      help="Kraken.io API Secret")
-    comp.add_argument("--kraken-quality",
-                      metavar="N",
-                      type=int,
-                      default=90,
-                      help="Kraken.io quality 1-100")
-    comp.add_argument("--imagekit-key",
-                      metavar="KEY",
-                      help="ImageKit public key")
-    comp.add_argument("--imagekit-secret",
-                      metavar="SECRET",
-                      help="ImageKit private key")
-    comp.add_argument("--imagekit-endpoint",
-                      metavar="URL",
-                      help="ImageKit URL endpoint")
-    comp.add_argument("--imagekit-quality",
-                      metavar="N",
-                      type=int,
-                      default=90,
-                      help="ImageKit quality 1-100")
-    comp.add_argument("--cloudinary-name",
-                      metavar="NAME",
-                      help="Cloudinary cloud name")
-    comp.add_argument("--cloudinary-key",
-                      metavar="KEY",
-                      help="Cloudinary API key")
-    comp.add_argument("--cloudinary-secret",
-                      metavar="SECRET",
-                      help="Cloudinary API secret")
-    comp.add_argument("--cloudinary-quality",
-                      metavar="LEVEL",
-                      default="auto:best",
-                      choices=["auto", "auto:best", "auto:good", "auto:eco", "auto:low"],
-                      help="{auto,auto:best,auto:good,auto:eco,auto:low}")
-
-    return p
-
-class _CLIWorker(Worker):
-
-    def __init__(self, cfg, quiet: bool = False):
-
-        self.cfg             = cfg
-        self._stop_requested = False
-        self._temp_files     = []
-        self._quiet          = quiet
-
-    def log(self, msg: str):
-        if not self._quiet:
-            print(msg, flush=True)
-
-    def _request_image_order(self, images: list):
-
-        self.log("Loading BG images are not numerically named — using alphabetical order (CLI mode).")
-        return sorted(images, key=lambda p: p.name)
-
-    class _Noop:
-        def emit(self, *a): pass
-    progress_signal = _Noop()
-    done_signal     = _Noop()
-    log_signal      = _Noop()
-    show_order_dialog = _Noop()
-
-def _run_interactive(args):
-
-    print("\n╔══════════════════════════════════════════════════════╗")
-    print("║   Horizon UI Extension Studio — Interactive CLI     ║")
-    print("╚══════════════════════════════════════════════════════╝\n")
-
-    def ask(prompt, default=""):
-        suffix = f" [{default}]" if default else ""
-        val = input(f"{prompt}{suffix}: ").strip()
-        return val if val else default
-
-    video   = ask("Video file or YouTube URL")
-    if not video:
-        print("❌ Video path / URL is required."); sys.exit(1)
-
-    name    = ask("Extension name", "MyExtension")
-    creator = ask("Creator name",   "Unknown")
-    output  = ask("Output folder",  str(Path.home() / "HorizonExtensions"))
-    start   = ask("Start time (s or mm:ss)", "0")
-    end     = ask("End time   (s or mm:ss)", "30")
-    fps     = int(ask("Extract FPS", "20") or 20)
-    anim_f  = int(ask("Anim frames", "100") or 100)
-    load_f  = int(ask("Loading frames", "100") or 100)
-    bgm     = ask("BGM file (leave blank to extract from video)", "")
-    bgm_name= ask("BGM track name", "bgm")
-    load_bg = ask("Loading BG folder (leave blank to extract from video)", "")
-    method  = ask("Compress method [lossless/pillow/ffmpeg/tinypng/kraken/imagekit/cloudinary/compressor]", "lossless")
-    ext_ver = ask("Extension version (X.Y.Z)", "201.1.0")
-    pack_icon = ask("Pack icon PNG path (leave blank to skip)", "")
-    bg_mode = ask("Background mode [dynamic/static/both]", "dynamic")
-
-    cfg = _build_cfg_from_values(
-        video=video, name=name, creator=creator, output=output,
-        start=start, end=end, fps=fps, anim_frames=anim_f,
-        load_frames=load_f, bgm=bgm, bgm_name=bgm_name,
-        loading_bg=load_bg, compress=method,
-        pillow_quality="high", ffmpeg_qv=1,
-        tinypng_key="", kraken_key="", kraken_secret="", kraken_quality=90,
-        imagekit_key="", imagekit_secret="", imagekit_endpoint="", imagekit_quality=90,
-        cloudinary_name="", cloudinary_key="", cloudinary_secret="",
-        cloudinary_quality="auto:best",
-        ext_version=ext_ver, pack_icon=pack_icon, bg_mode=bg_mode,
-    )
-    return cfg
-
-def _build_cfg_from_values(*, video, name, creator, output,
-                            start, end, fps, anim_frames, load_frames,
-                            bgm, bgm_name, loading_bg, compress,
-                            pillow_quality, ffmpeg_qv,
-                            tinypng_key, kraken_key, kraken_secret, kraken_quality,
-                            imagekit_key, imagekit_secret, imagekit_endpoint, imagekit_quality,
-                            cloudinary_name, cloudinary_key, cloudinary_secret,
-                            cloudinary_quality,
-                            ext_version="201.1.0", pack_icon="",
-                            bg_mode="dynamic") -> dict:
-    try:
-        start_sec = Worker.parse_time(start) if start else 0
-        end_sec   = Worker.parse_time(end)   if end   else 30
-    except ValueError as e:
-        print(f"❌ Time error: {e}"); sys.exit(1)
-
-    if end_sec is not None and start_sec is not None and end_sec <= start_sec:
-        print("❌ End time must be greater than start time."); sys.exit(1)
-
-    if not bgm_name and bgm:
-        bgm_name = Path(bgm).stem
-    bgm_name = bgm_name or "bgm"
-
-    ver_parts = [int(v) for v in (ext_version or "201.1.0").split(".")[:3]]
-    while len(ver_parts) < 3:
-        ver_parts.append(0)
-
-    pack_icon_pil  = None
-    pack_icon_path = pack_icon or ""
-    if pack_icon_path:
-        src = Path(pack_icon_path)
-        if src.exists() and src.stem.lower() != "pack_icon":
-            try:
-                img = Image.open(str(src)).convert("RGBA")
-                pack_icon_pil = img.resize((256, 256), Image.LANCZOS)
-                pack_icon_path = ""
-            except Exception as e:
-                print(f"⚠️ Could not load pack icon: {e}")
-                pack_icon_path = ""
-
-    return {
-        "video_path":            video,
-        "output_folder":         output,
-        "new_pack_name":         name,
-        "creator":               creator,
-        "bgm_file":              bgm or "",
-        "bgm_name":              bgm_name,
-        "start_seconds":         start_sec,
-        "end_seconds":           end_sec,
-        "fps":                   fps,
-        "anim_frames":           int(anim_frames),
-        "load_frames":           int(load_frames),
-        "compress_method":       compress,
-        "pillow_quality":        pillow_quality,
-        "ffmpeg_qv":             ffmpeg_qv,
-        "tinify_key":            tinypng_key or "",
-        "kraken_key":            kraken_key or "",
-        "kraken_secret":         kraken_secret or "",
-        "kraken_quality":        kraken_quality,
-        "imagekit_key":          imagekit_key or "",
-        "imagekit_secret":       imagekit_secret or "",
-        "imagekit_urlendpoint":  imagekit_endpoint or "",
-        "imagekit_quality":      imagekit_quality,
-        "cloudinary_name":       cloudinary_name or "",
-        "cloudinary_key":        cloudinary_key or "",
-        "cloudinary_secret":     cloudinary_secret or "",
-        "cloudinary_quality":    cloudinary_quality,
-        "loading_bg_folder":     loading_bg or "",
-        "ext_ver_x":             ver_parts[0],
-        "ext_ver_y":             ver_parts[1],
-        "ext_ver_z":             ver_parts[2],
-        "pack_icon_pil":         pack_icon_pil,
-        "pack_icon_path":        pack_icon_path,
-        "bg_mode":               bg_mode,
-        "source_is_image":       False,
-    }
-
-def _run_cli(args):
-
-    if args.interactive:
-        cfg = _run_interactive(args)
-    else:
-        _src_video = args.video
-        _src_is_img = False
-        if getattr(args, "image", None):
-            _src_video = args.image
-            _src_is_img = True
-        if not _src_video:
-            parser.print_help(); sys.exit(0)
-        cfg = _build_cfg_from_values(
-            video=_src_video,
-            name=args.name,
-            creator=args.creator,
-            output=args.output,
-            start=args.start or "0",
-            end=args.end or "30",
-            fps=args.fps,
-            anim_frames=args.anim_frames,
-            load_frames=args.load_frames,
-            bgm=args.bgm or "",
-            bgm_name=args.bgm_name or "",
-            loading_bg=args.loading_bg or "",
-            compress=args.compress,
-            pillow_quality=args.pillow_quality,
-            ffmpeg_qv=args.ffmpeg_qv,
-            tinypng_key=args.tinypng_key or "",
-            kraken_key=args.kraken_key or "",
-            kraken_secret=args.kraken_secret or "",
-            kraken_quality=args.kraken_quality,
-            imagekit_key=args.imagekit_key or "",
-            imagekit_secret=args.imagekit_secret or "",
-            imagekit_endpoint=args.imagekit_endpoint or "",
-            imagekit_quality=args.imagekit_quality,
-            cloudinary_name=args.cloudinary_name or "",
-            cloudinary_key=args.cloudinary_key or "",
-            cloudinary_secret=args.cloudinary_secret or "",
-            cloudinary_quality=args.cloudinary_quality,
-            ext_version=args.ext_version,
-            pack_icon=args.pack_icon or "",
-            bg_mode=args.bg_mode,
-        )
-
-    cfg["source_is_image"] = _src_is_img
-    worker = _CLIWorker(cfg, quiet=args.quiet)
-
-    if not args.quiet:
-        print(f"\n▶  Building: {cfg['new_pack_name']}")
-        print(f"   Source  : {cfg['video_path']}")
-        print(f"   Output  : {cfg['output_folder']}")
-        print(f"   Compress: {cfg['compress_method']}")
-        print(f"   Version : {cfg['ext_ver_x']}.{cfg['ext_ver_y']}.{cfg['ext_ver_z']}")
-        print(f"   BG Mode : {cfg['bg_mode']}\n")
-
-    try:
-        worker.process()
-        print(f"\n✅ Done!  →  {Path(cfg['output_folder']) / (cfg['new_pack_name'] + '.mcpack')}")
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        print(f"\n❌ Failed: {exc}")
-        sys.exit(1)
-
-_CLI_FLAGS = {
-    "--video", "--image", "--name", "-n", "--output", "-o", "--creator", "-c",
-    "--start", "--end", "--fps", "--anim-frames", "--load-frames",
-    "--bgm", "--bgm-name", "--loading-bg",
-    "--compress", "--pillow-quality", "--ffmpeg-qv",
-    "--tinypng-key", "--kraken-key", "--kraken-secret", "--kraken-quality",
-    "--imagekit-key", "--imagekit-secret", "--imagekit-endpoint", "--imagekit-quality",
-    "--cloudinary-name", "--cloudinary-key", "--cloudinary-secret", "--cloudinary-quality",
-    "--interactive", "-i", "--quiet", "-q", "--skip-bootstrap",
-    "--help", "-h",
-    "--ext-version", "--pack-icon", "--bg-mode",
-}
-
-def _wants_cli(argv) -> bool:
-
-    for tok in argv:
-        if tok in _CLI_FLAGS or tok.startswith("--") or (tok.startswith("-") and len(tok) == 2):
-            return True
-    return False
 
 def main():
-    raw_args = sys.argv[1:]
+    app = QApplication(sys.argv)
 
-    if _wants_cli(raw_args):
+    if not _check_license(app):
+        sys.exit(0)
 
-        parser = _build_arg_parser()
-        args   = parser.parse_args(raw_args)
-
-        if not args.video and not args.interactive:
-
-            parser.print_help()
-            sys.exit(0)
-
-        _run_cli(args)
-
-    else:
-
-        app = QApplication(sys.argv)
-
-        if not _check_license(app):
-            sys.exit(0)
-
-        w = MainWindow()
+    w = MainWindow()
+    settings = _load_settings()
+    if settings.get("transparent", True):
         w.setWindowOpacity(0.85)
-        w.show()
-        sys.exit(app.exec_())
+    if settings.get("debug", False):
+        _IS_DEBUG = True
+    w.show()
+    sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()
