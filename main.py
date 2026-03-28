@@ -8,7 +8,14 @@ def _ffmpeg_in_path(name: str) -> bool:
         subprocess.check_output([name, "-version"], stderr=subprocess.DEVNULL)
         return True
     except Exception:
-        return False
+        pass
+    # Also check %APPDATA%\ffmpeg\ffmpeg.exe
+    if name == "ffmpeg":
+        appdata_exe = Path(os.environ.get("APPDATA", "")) / "ffmpeg" / "ffmpeg.exe"
+        if appdata_exe.exists():
+            _add_to_path(str(appdata_exe.parent))
+            return True
+    return False
 
 def _ytdlp_in_path(name: str) -> bool:
     try:
@@ -23,6 +30,8 @@ def _add_to_path(directory: str):
         os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
 
 def _bootstrap_install():
+    import io
+    sys.modules['cStringIO'] = io
     print("────────────────────────────────────────────────────────")
     pip_pkgs = [
         ("PyQt5",    "PyQt5"),
@@ -47,7 +56,7 @@ def _bootstrap_install():
             print(f"[PIP] Installing {pkg_name}...")
             try:
                 subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "--quiet", pkg_name, "--break-system-packages"],
+                    [sys.executable, "-m", "pip", "install", "--quiet", pkg_name],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 print(f"[PIP] {pkg_name} ✓")
@@ -62,19 +71,216 @@ def _bootstrap_install():
     for imp, pkg in optional_pkgs:
         pip_install(imp, pkg)
 
+    print("[BOOTSTRAP] ── ffmpeg and yt-dlp tools ───────────")
+
+    is_win   = sys.platform.startswith("win")
+    is_mac   = sys.platform == "darwin"
+
+    # ── Per-OS expected ffmpeg locations ──────────────────────────────────────
+    if is_win:
+        _ff_dirs = [
+            Path(os.environ.get("APPDATA", "")) / "ffmpeg",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "ffmpeg",
+            Path("C:/ffmpeg/bin"),
+        ]
+        _ff_exe = "ffmpeg.exe"
+    elif is_mac:
+        _ff_dirs = [
+            Path("/opt/homebrew/bin"),
+            Path("/usr/local/bin"),
+            Path.home() / ".local" / "bin",
+        ]
+        _ff_exe = "ffmpeg"
+    else:
+        _ff_dirs = [
+            Path("/usr/bin"),
+            Path("/usr/local/bin"),
+            Path.home() / ".local" / "bin",
+        ]
+        _ff_exe = "ffmpeg"
+
+    def _find_ffmpeg():
+        """Return Path to ffmpeg if found in known locations or PATH."""
+        for d in _ff_dirs:
+            f = d / _ff_exe
+            if f.exists():
+                return f
+        # Also check plain PATH
+        try:
+            out = subprocess.check_output(
+                ["ffmpeg", "-version"], stderr=subprocess.DEVNULL
+            )
+            return Path("ffmpeg")
+        except Exception:
+            return None
+
+    ff_path = _find_ffmpeg()
+    if ff_path:
+        print(f"[BOOTSTRAP] ffmpeg found: {ff_path} ✓")
+        _add_to_path(str(ff_path.parent) if ff_path.name != "ffmpeg" or ff_path.parent != Path(".") else "")
+    else:
+        print("[BOOTSTRAP] ffmpeg not found — attempting install...")
+
+        def _try_win_install_ffmpeg():
+            """Windows: try winget → scoop → choco → direct download."""
+            for mgr, cmd in [
+                ("winget",  ["winget", "install", "--id", "Gyan.FFmpeg", "-e", "--silent",
+                              "--accept-package-agreements", "--accept-source-agreements"]),
+                ("scoop",   ["scoop", "install", "ffmpeg"]),
+                ("choco",   ["choco", "install", "ffmpeg", "-y"]),
+            ]:
+                try:
+                    print(f"[BOOTSTRAP] Trying {mgr}...")
+                    r = subprocess.run(cmd, timeout=300, capture_output=True)
+                    if r.returncode == 0:
+                        ff = _find_ffmpeg()
+                        if ff:
+                            print(f"[BOOTSTRAP] ffmpeg installed via {mgr} ✓")
+                            return ff
+                except Exception:
+                    pass
+
+            # Direct download from BtbN GitHub releases
+            print("[BOOTSTRAP] Trying direct download (BtbN)...")
+            try:
+                import urllib.request, zipfile as _zf, tempfile as _tmp
+                api = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+                with urllib.request.urlopen(api, timeout=20) as r:
+                    data = json.loads(r.read())
+                asset_url = next(
+                    a["browser_download_url"] for a in data["assets"]
+                    if "win64" in a["name"] and "gpl" in a["name"]
+                    and a["name"].endswith(".zip") and "shared" not in a["name"]
+                )
+                tmp = Path(_tmp.mkdtemp())
+                zp  = tmp / "ffmpeg.zip"
+                print(f"[BOOTSTRAP] Downloading {asset_url} ...")
+                urllib.request.urlretrieve(asset_url, zp)
+                with _zf.ZipFile(zp) as z:
+                    z.extractall(tmp)
+                ff_exe = next(tmp.rglob("ffmpeg.exe"), None)
+                if ff_exe:
+                    dst_dir = Path(os.environ.get("APPDATA", Path.home())) / "ffmpeg"
+                    dst_dir.mkdir(parents=True, exist_ok=True)
+                    for exe in ("ffmpeg.exe", "ffprobe.exe"):
+                        src = next(tmp.rglob(exe), None)
+                        if src:
+                            import shutil as _sh
+                            _sh.copy2(src, dst_dir / exe)
+                    _add_to_path(str(dst_dir))
+                    import shutil as _sh2; _sh2.rmtree(tmp, ignore_errors=True)
+                    ff = _find_ffmpeg()
+                    if ff:
+                        print(f"[BOOTSTRAP] ffmpeg installed via direct download ✓")
+                        return ff
+            except Exception as e:
+                print(f"[BOOTSTRAP] Direct download failed: {e}")
+            return None
+
+        def _try_unix_install_ffmpeg():
+            """macOS/Linux: try brew/apt/dnf/pacman → pip static build."""
+            managers = []
+            if is_mac:
+                managers = [
+                    ["brew",   "install", "ffmpeg"],
+                    ["port",   "install", "ffmpeg"],
+                ]
+            else:
+                managers = [
+                    ["apt-get", "install", "-y", "ffmpeg"],
+                    ["apt",     "install", "-y", "ffmpeg"],
+                    ["dnf",     "install", "-y", "ffmpeg"],
+                    ["pacman",  "-S", "--noconfirm", "ffmpeg"],
+                    ["apk",     "add", "ffmpeg"],
+                ]
+            for cmd in managers:
+                try:
+                    print(f"[BOOTSTRAP] Trying {cmd[0]}...")
+                    r = subprocess.run(["sudo"] + cmd if not is_mac else cmd,
+                                       timeout=300, capture_output=True)
+                    if r.returncode == 0:
+                        ff = _find_ffmpeg()
+                        if ff:
+                            print(f"[BOOTSTRAP] ffmpeg installed via {cmd[0]} ✓")
+                            return ff
+                except Exception:
+                    pass
+
+            # Static binary fallback
+            try:
+                import urllib.request, tempfile as _tmp, stat as _stat
+                if is_mac:
+                    url = "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"
+                else:
+                    url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+                print(f"[BOOTSTRAP] Downloading static ffmpeg from {url} ...")
+                tmp = Path(_tmp.mkdtemp())
+                arch = tmp / ("ff.zip" if is_mac else "ff.tar.xz")
+                urllib.request.urlretrieve(url, arch)
+                if is_mac:
+                    import zipfile as _zf
+                    with _zf.ZipFile(arch) as z: z.extractall(tmp)
+                else:
+                    subprocess.run(["tar", "-xf", str(arch), "-C", str(tmp)],
+                                   check=True, capture_output=True)
+                ff_bin = next(tmp.rglob("ffmpeg"), None)
+                if ff_bin and ff_bin.is_file():
+                    dst = Path.home() / ".local" / "bin" / "ffmpeg"
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    import shutil as _sh; _sh.copy2(ff_bin, dst)
+                    dst.chmod(dst.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+                    _add_to_path(str(dst.parent))
+                    import shutil as _sh2; _sh2.rmtree(tmp, ignore_errors=True)
+                    ff = _find_ffmpeg()
+                    if ff:
+                        print(f"[BOOTSTRAP] ffmpeg installed via static binary ✓")
+                        return ff
+            except Exception as e:
+                print(f"[BOOTSTRAP] Static install failed: {e}")
+            return None
+
+        ff_path = _try_win_install_ffmpeg() if is_win else _try_unix_install_ffmpeg()
+        if not ff_path:
+            print("[BOOTSTRAP] ⚠ Could not install ffmpeg automatically. Please install manually.")
+
+    # Store resolved path for use by Worker
+    if ff_path and ff_path != Path("ffmpeg"):
+        os.environ["_HRZN_FFMPEG_EXE"] = str(ff_path)
+
+    # yt-dlp: ensure installed via pip
+    try:
+        subprocess.check_output(["yt-dlp", "--version"], stderr=subprocess.DEVNULL)
+        print("[BOOTSTRAP] yt-dlp found ✓")
+    except Exception:
+        print("[BOOTSTRAP] yt-dlp not found — installing via pip...")
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            print("[BOOTSTRAP] yt-dlp installed ✓")
+        except Exception as e:
+            print(f"[BOOTSTRAP] yt-dlp install failed: {e}")
+
     print("[BOOTSTRAP] ── Done ──────────────────────────────")
 
 _IS_DEBUG = bool({"--debug"} & set(sys.argv[1:]))
+
+# Pre-add %APPDATA%\ffmpeg to PATH so bootstrap tool checks can find it
+_appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg"
+if _appdata_ffmpeg.exists():
+    _add_to_path(str(_appdata_ffmpeg))
+
 _bootstrap_install()
 
 
 def _get_ffmpeg_exe() -> str:
-    """Return the ffmpeg executable path."""
-    try:
-        subprocess.check_output(["ffmpeg", "-version"], stderr=subprocess.DEVNULL)
-        return "ffmpeg"
-    except Exception:
-        pass
+    """Return the ffmpeg executable path, preferring the one found/installed by bootstrap."""
+    # Check env var set by bootstrap first
+    env_path = os.environ.get("_HRZN_FFMPEG_EXE", "")
+    if env_path and Path(env_path).exists():
+        return env_path
+    # Check %APPDATA%\ffmpeg\ffmpeg.exe (Windows)
     appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg" / "ffmpeg.exe"
     if appdata_ffmpeg.exists():
         return str(appdata_ffmpeg)
@@ -2586,8 +2792,11 @@ class JavaWorker(Worker):
     """
 
     def _java_safe_name(self) -> str:
-        """Filesystem-safe version of the pack name for file/folder naming."""
-        return re.sub(r'[\\/:*?"<>|§]', "_", self.cfg.get("new_pack_name", "MyExtension").strip())
+        """Strip §-codes and filesystem-unsafe chars for use in file/folder names."""
+        name = self.cfg.get("new_pack_name", "MyExtension").strip()
+        name = re.sub(r"§.", "", name)          # strip §x colour/format codes
+        name = re.sub(r'[\\/:*?"<>|]', "_", name)  # strip filesystem-unsafe chars
+        return name.strip("_ ") or "MyExtension"
 
     def _success_message(self) -> str:
         return "✅ .zip created successfully!"
@@ -2675,7 +2884,7 @@ class JavaWorker(Worker):
         self._ensure_dir(output_folder)
         ext_name  = self.cfg["new_pack_name"].strip()
         safe_name = self._java_safe_name()
-        pack_root = output_folder / ext_name
+        pack_root = output_folder / safe_name
         if pack_root.exists(): shutil.rmtree(pack_root)
         self._ensure_dir(pack_root)
         self._temp_files.append(pack_root)
@@ -2723,7 +2932,7 @@ class JavaWorker(Worker):
         self._java_gen_pack_mcmeta(pack_root)
         tick("Metadata generated")
 
-        zip_base = output_folder / (ext_name + ".zip")
+        zip_base = output_folder / (safe_name + ".zip")
         if zip_base.exists(): zip_base.unlink()
         self.log(f"[Java] Packing → {zip_base}")
         shutil.make_archive(str(zip_base.with_suffix("")), "zip", pack_root)
@@ -2980,6 +3189,8 @@ class MainWindow(QWidget):
         self.setMinimumWidth(860)
         self.setMinimumHeight(740)
         self._set_icon_from_url("https://www.dropbox.com/scl/fi/yymr5hnfkko77aaxadjta/logo_bigger.png?rlkey=gicau4lxtbbhmq9vt2reyrk8c&st=kvv7wolj&dl=1")
+        self._about_banner_data = b""
+        self._prefetch_banner()
         self._build_ui()
 
     def _set_icon_from_url(self, url: str):
@@ -2991,6 +3202,29 @@ class MainWindow(QWidget):
             self.setWindowIcon(QIcon(px))
         except Exception as e:
             print(f"[icon] Could not load icon: {e}")
+
+    def _prefetch_banner(self):
+        _BANNER_URL = "https://www.dropbox.com/scl/fi/w61xk942afmyvz54rb8xx/HDILdO1aoAArAMq.jpg?rlkey=rd1bfbpky16kta3jkelsp480e&st=fatacbzw&dl=1"
+
+        class _Fetcher(QtCore.QThread):
+            result = QtCore.pyqtSignal(bytes)
+            def __init__(self, url):
+                super().__init__()
+                self._url = url
+            def run(self):
+                try:
+                    import urllib.request
+                    data = urllib.request.urlopen(self._url, timeout=10).read()
+                    self.result.emit(data)
+                except Exception:
+                    self.result.emit(b"")
+
+        def _on_data(data):
+            self._about_banner_data = data
+
+        self._banner_fetcher = _Fetcher(_BANNER_URL)
+        self._banner_fetcher.result.connect(_on_data)
+        self._banner_fetcher.start()
 
     def _build_ui(self):
         from PyQt5.QtWidgets import QSplitter, QTabWidget
@@ -3054,33 +3288,41 @@ class MainWindow(QWidget):
         self.btn_cancel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.btn_cancel.setFixedWidth(180)
 
-        # Settings button — corner of the inner tab row
+        # Open… button — outer tab bar row, left of Build
+        self._btn_open_pack = QPushButton("Open…")
+        self._btn_open_pack.setToolTip("Load an existing .mcpack or .zip to pre-fill the form")
+        self._btn_open_pack.clicked.connect(self._load_pack_from_file)
+
+        # Settings button — corner of the inner tab row (Bedrock only)
         self._btn_settings = QPushButton("Settings")
         self._btn_settings.setToolTip("Options & About")
         self._btn_settings.clicked.connect(self._show_settings_menu)
 
+        self._inner_corner_widget = QWidget()
+        _icw_h = QHBoxLayout(self._inner_corner_widget)
+        _icw_h.setContentsMargins(0, 0, 4, 0)
+        _icw_h.setSpacing(2)
+        _icw_h.addWidget(self._btn_settings)
+
+        self._outer_tab_widget.setCornerWidget(self._btn_open_pack, Qt.TopRightCorner)
         self._outer_tab_widget.tabBar().setExpanding(True)
 
-        # ── Inner tabs for each edition (HorizonUI | NekoUI) ──────────────────
+        # ── Inner tabs for Bedrock (HorizonUI | NekoUI) ───────────────────────
         self._bedrock_tab_widget = QTabWidget()
         self._bedrock_tab_widget.setTabPosition(QTabWidget.North)
         self._bedrock_tab_widget.setStyleSheet(_tab_style)
         self._bedrock_tab_widget.currentChanged.connect(self._on_tab_changed)
         self._bedrock_tab_widget.tabBar().setExpanding(True)
 
-        self._java_tab_widget = QTabWidget()
-        self._java_tab_widget.setTabPosition(QTabWidget.North)
-        self._java_tab_widget.setStyleSheet(_tab_style)
-        self._java_tab_widget.currentChanged.connect(self._on_tab_changed)
-        self._java_tab_widget.tabBar().setExpanding(True)
+        for label in ("HorizonUI", "NekoUI"):
+            w = QWidget()
+            QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
+            self._bedrock_tab_widget.addTab(w, label)
 
-        for inner in (self._bedrock_tab_widget, self._java_tab_widget):
-            for label in ("HorizonUI", "NekoUI"):
-                w = QWidget()
-                QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
-                inner.addTab(w, label)
+        self._bedrock_tab_widget.setCornerWidget(self._inner_corner_widget, Qt.TopRightCorner)
 
-        self._bedrock_tab_widget.setCornerWidget(self._btn_settings, Qt.TopRightCorner)
+        # Java Edition: no inner tabs needed (both UIs share same structure)
+        self._java_tab_widget = None   # not used
 
         bedrock_outer = QWidget()
         bedrock_vbox  = QVBoxLayout(bedrock_outer)
@@ -3088,11 +3330,21 @@ class MainWindow(QWidget):
         bedrock_vbox.setSpacing(0)
         bedrock_vbox.addWidget(self._bedrock_tab_widget)
 
+        # Java outer — plain widget, no inner tabs
         java_outer = QWidget()
+        java_outer.setStyleSheet("background: transparent;")
         java_vbox  = QVBoxLayout(java_outer)
         java_vbox.setContentsMargins(0, 0, 0, 0)
         java_vbox.setSpacing(0)
-        java_vbox.addWidget(self._java_tab_widget)
+        # Settings button for Java side (reuse same widget)
+        java_settings_row = QWidget()
+        java_settings_h   = QHBoxLayout(java_settings_row)
+        java_settings_h.setContentsMargins(4, 2, 4, 2)
+        java_settings_h.setSpacing(2)
+        java_settings_h.addStretch()
+        # Settings re-parented dynamically in _on_outer_tab_changed
+        java_vbox.addWidget(java_settings_row)
+        self._java_settings_row = java_settings_row
 
         self._outer_tab_widget.addTab(bedrock_outer, "Bedrock Edition")
         self._outer_tab_widget.addTab(java_outer,    "Java Edition")
@@ -3104,14 +3356,14 @@ class MainWindow(QWidget):
         tab_build_h.setSpacing(0)
         tab_build_h.addWidget(self._outer_tab_widget, stretch=1)
 
-        # Stack Build and Cancel on top of each other in a fixed-width column
+        # Build / Cancel span both tab rows in a fixed-width column
         build_col = QWidget()
         build_col.setFixedWidth(184)
         build_col_v = QVBoxLayout(build_col)
         build_col_v.setContentsMargins(4, 2, 4, 2)
         build_col_v.setSpacing(0)
-        build_col_v.addWidget(self.btn_run)
-        build_col_v.addWidget(self.btn_cancel)
+        build_col_v.addWidget(self.btn_run, stretch=1)
+        build_col_v.addWidget(self.btn_cancel, stretch=1)
         tab_build_h.addWidget(build_col)
 
         outer.addWidget(tab_build_row)
@@ -3173,12 +3425,6 @@ class MainWindow(QWidget):
             r += 1
 
         _sec("OUTPUT")
-
-        # Load pack button — load metadata from existing .mcpack/.zip
-        btn_load_pack = QPushButton("Load from .mcpack / .zip…")
-        btn_load_pack.setToolTip("Load an existing pack to pre-fill extension name, version, creator, and detect edition/UI type")
-        btn_load_pack.clicked.connect(self._load_pack_from_file)
-        g.addWidget(btn_load_pack, r, 0, 1, 3); r += 1
 
         self.inp_output = QLineEdit(str(Path.home() / "UI_Extensions"))
         btn_o = QPushButton("Browse…"); btn_o.clicked.connect(self.browse_output)
@@ -3443,7 +3689,7 @@ class MainWindow(QWidget):
         self._container_bg_count_lbl = QLabel("0 custom")
         self._container_bg_count_lbl.setStyleSheet("color:#888; font-size:10px;")
         self._btn_container_bg_edit  = QPushButton("Edit")
-        self._btn_container_bg_edit.setFixedWidth(120)
+        self._btn_container_bg_edit.setFixedWidth(110)
         self._btn_container_bg_edit.clicked.connect(self._open_container_bg_dialog)
         self._container_bg_row = QWidget()
         container_bg_h   = QHBoxLayout(self._container_bg_row)
@@ -3481,8 +3727,8 @@ class MainWindow(QWidget):
         btn_lbg_clear.setToolTip("Clear — use black frame")
         btn_lbg_clear.clicked.connect(lambda: self.inp_loading_bg.clear())
 
-        lbg_btn_group = QWidget()
-        lbg_btn_h = QHBoxLayout(lbg_btn_group)
+        self._lbg_btn_group = QWidget()
+        lbg_btn_h = QHBoxLayout(self._lbg_btn_group)
         lbg_btn_h.setContentsMargins(0, 0, 0, 0)
         lbg_btn_h.setSpacing(2)
         lbg_btn_h.addWidget(self._btn_lbg)
@@ -3491,7 +3737,7 @@ class MainWindow(QWidget):
         self._lbl_loading_bg = QLabel("Loading Background:")
         g.addWidget(self._lbl_loading_bg, r, 0)
         g.addWidget(self.inp_loading_bg, r, 1)
-        g.addWidget(lbg_btn_group, r, 2)
+        g.addWidget(self._lbg_btn_group, r, 2)
         r += 1
 
         self.inp_loading_bg.textChanged.connect(self._dummy_load_frames_compat)
@@ -3650,10 +3896,10 @@ class MainWindow(QWidget):
         return "java" if self._outer_tab_widget.currentIndex() == 1 else "bedrock"
 
     def _current_ui_mode(self) -> str:
-        """Returns 'horizon', 'neko' based on the active inner tab."""
-        inner = (self._java_tab_widget if self._current_edition() == "java"
-                 else self._bedrock_tab_widget)
-        return "neko" if inner.currentIndex() == 1 else "horizon"
+        """Returns 'horizon' or 'neko'. Java Edition always returns 'horizon' (shared structure)."""
+        if self._current_edition() == "java":
+            return "horizon"
+        return "neko" if self._bedrock_tab_widget.currentIndex() == 1 else "horizon"
 
     def _toggle_java_fields(self):
         """Hide BGM, Loading BG, ASSETS section, and Container BG when Java Edition is active."""
@@ -3663,7 +3909,7 @@ class MainWindow(QWidget):
         for w in (self._sep_assets, self._lbl_sec_assets,
                   self._lbl_container_bg, self._container_bg_row, self._btn_container_bg_edit,
                   self._lbl_bgm, self.inp_bgm, self._btn_bgm,
-                  self._lbl_loading_bg, self.inp_loading_bg, self._btn_lbg):
+                  self._lbl_loading_bg, self.inp_loading_bg, self._lbg_btn_group):
             w.setVisible(not is_java)
 
     def _open_container_bg_dialog(self):
@@ -3680,11 +3926,10 @@ class MainWindow(QWidget):
     def _on_outer_tab_changed(self, _index: int):
         if not hasattr(self, "btn_run"):
             return
-        # Move Settings button to the currently-visible inner tab bar
-        inner = (self._java_tab_widget if self._current_edition() == "java"
-                 else self._bedrock_tab_widget)
-        inner.setCornerWidget(self._btn_settings, Qt.TopRightCorner)
-        self._btn_settings.show()
+        # Settings button lives in bedrock inner tab corner only
+        if self._current_edition() == "bedrock":
+            self._bedrock_tab_widget.setCornerWidget(self._inner_corner_widget, Qt.TopRightCorner)
+            self._inner_corner_widget.show()
         self._toggle_java_fields()
         self._update_build_button()
 
@@ -4156,12 +4401,32 @@ class MainWindow(QWidget):
     def _show_about(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("About")
-        dlg.setMinimumSize(420, 280)
+        dlg.setMinimumSize(480, 360)
         dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         outer = QVBoxLayout(dlg)
-        outer.setContentsMargins(20, 18, 20, 14)
+        outer.setContentsMargins(0, 0, 0, 14)
         outer.setSpacing(10)
+
+        # ── Banner image ──────────────────────────────────────────────────────
+        self._about_banner_lbl = QLabel()
+        self._about_banner_lbl.setFixedHeight(200)
+        self._about_banner_lbl.setAlignment(Qt.AlignCenter)
+        self._about_banner_lbl.setStyleSheet("background:#d7d7d7;")
+        outer.addWidget(self._about_banner_lbl)
+
+        # Use pre-fetched data (loaded at startup)
+        if self._about_banner_data:
+            px = QPixmap()
+            px.loadFromData(self._about_banner_data)
+            self._about_banner_lbl.setPixmap(
+                px.scaled(480, 200, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            )
+
+        # ── Info text ─────────────────────────────────────────────────────────
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(20, 0, 20, 0)
 
         ver = f"{config.get('VERSION', '?')}_{config.get('COMMIT', '?')}"
         info = QLabel(
@@ -4173,22 +4438,24 @@ class MainWindow(QWidget):
         )
         info.setWordWrap(True)
         info.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        outer.addWidget(info, stretch=1)
+        info_layout.addWidget(info, stretch=1)
+        outer.addWidget(info_widget, stretch=1)
 
         sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("color:#444;")
+        sep.setStyleSheet("color:#444; margin: 0 20px;")
         outer.addWidget(sep)
 
         btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(20, 0, 20, 0)
 
         def _link_btn(label, url):
             b = QPushButton(label)
             b.clicked.connect(lambda: __import__('webbrowser').open(url))
             return b
 
-        btn_row.addWidget(_link_btn("Website",         "https://tubeo5866.com"))
-        btn_row.addWidget(_link_btn("Discord Support",  "https://discord.gg/3fe3ySCJZf"))
-        btn_row.addWidget(_link_btn("Email Support",    "mailto:support@tubeo5866.com"))
+        btn_row.addWidget(_link_btn("Website",          "https://tubeo5866.com"))
+        btn_row.addWidget(_link_btn("Discord Support",   "https://discord.gg/3fe3ySCJZf"))
+        btn_row.addWidget(_link_btn("Email Support",     "mailto:support@tubeo5866.com"))
         btn_row.addWidget(_link_btn("Request a Feature", "https://forms.gle/KTJQCq8EdseQhFKp9"))
         btn_row.addStretch()
 
