@@ -1,2 +1,3 @@
 All errors are fixed -- now the script is running smoothly. 
-If you still found a problem, go to "Settings > About" and get support from my Discord server or my mail support!
+If you still found a problem, go to "About" and get support from my Discord server or my mail support!
+Also, request a new feature you think it'll be useful to my script!
