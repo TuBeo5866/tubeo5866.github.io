@@ -50,26 +50,54 @@ def _bootstrap_install():
     ]
 
     def pip_install(import_name, pkg_name):
+        """
+        Returns:
+          (ok, already_present, err_str)
+        """
         try:
             __import__(import_name)
+            return True, True, ""
         except ImportError:
-            print(f"[PIP] Installing {pkg_name}...")
-            try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "--quiet", pkg_name],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-                print(f"[PIP] {pkg_name} ✓")
-            except Exception as e:
-                print(f"[PIP] {pkg_name} failed: {e}")
+            pass
+        print(f"[PIP] Installing {pkg_name}...")
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--quiet", pkg_name],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            print(f"[PIP] {pkg_name} ✓")
+            return True, False, ""
+        except Exception as e:
+            print(f"[PIP] {pkg_name} failed: {e}")
+            return False, False, str(e)
 
     print("[BOOTSTRAP] ── Python packages ───────────────────")
+    py_installed = []
+    py_failed = []
     for imp, pkg in pip_pkgs:
-        pip_install(imp, pkg)
+        ok, _, _err = pip_install(imp, pkg)
+        if ok:
+            py_installed.append(pkg)
+        else:
+            py_failed.append(pkg)
+    if py_failed:
+        print(f"[BOOTSTRAP] Missing (needs install): {', '.join(py_failed)}")
+    if py_installed:
+        print(f"[BOOTSTRAP] Installed/OK: {', '.join(py_installed)}")
 
     print("[BOOTSTRAP] ── Optional packages ─────────────────")
+    opt_installed = []
+    opt_failed = []
     for imp, pkg in optional_pkgs:
-        pip_install(imp, pkg)
+        ok, _, _err = pip_install(imp, pkg)
+        if ok:
+            opt_installed.append(pkg)
+        else:
+            opt_failed.append(pkg)
+    if opt_failed:
+        print(f"[BOOTSTRAP] Optional missing (skipped/needs install): {', '.join(opt_failed)}")
+    if opt_installed:
+        print(f"[BOOTSTRAP] Optional installed/OK: {', '.join(opt_installed)}")
 
     print("[BOOTSTRAP] ── ffmpeg and yt-dlp tools ───────────")
 
@@ -115,11 +143,15 @@ def _bootstrap_install():
             return None
 
     ff_path = _find_ffmpeg()
+    ffmpeg_method = {"v": None}
     if ff_path:
+        ffmpeg_method["v"] = "found"
         print(f"[BOOTSTRAP] ffmpeg found: {ff_path} ✓")
         _add_to_path(str(ff_path.parent) if ff_path.name != "ffmpeg" or ff_path.parent != Path(".") else "")
     else:
         print("[BOOTSTRAP] ffmpeg not found — attempting install...")
+
+        ffmpeg_method["v"] = None
 
         def _try_win_install_ffmpeg():
             """Windows: try winget → scoop → choco → direct download."""
@@ -135,6 +167,7 @@ def _bootstrap_install():
                     if r.returncode == 0:
                         ff = _find_ffmpeg()
                         if ff:
+                            ffmpeg_method["v"] = f"installed via {mgr}"
                             print(f"[BOOTSTRAP] ffmpeg installed via {mgr} ✓")
                             return ff
                 except Exception:
@@ -171,6 +204,7 @@ def _bootstrap_install():
                     import shutil as _sh2; _sh2.rmtree(tmp, ignore_errors=True)
                     ff = _find_ffmpeg()
                     if ff:
+                        ffmpeg_method["v"] = "installed via direct download (BtbN)"
                         print(f"[BOOTSTRAP] ffmpeg installed via direct download ✓")
                         return ff
             except Exception as e:
@@ -201,6 +235,7 @@ def _bootstrap_install():
                     if r.returncode == 0:
                         ff = _find_ffmpeg()
                         if ff:
+                            ffmpeg_method["v"] = f"installed via {cmd[0]}"
                             print(f"[BOOTSTRAP] ffmpeg installed via {cmd[0]} ✓")
                             return ff
                 except Exception:
@@ -233,6 +268,7 @@ def _bootstrap_install():
                     import shutil as _sh2; _sh2.rmtree(tmp, ignore_errors=True)
                     ff = _find_ffmpeg()
                     if ff:
+                        ffmpeg_method["v"] = "installed via static binary"
                         print(f"[BOOTSTRAP] ffmpeg installed via static binary ✓")
                         return ff
             except Exception as e:
@@ -242,14 +278,20 @@ def _bootstrap_install():
         ff_path = _try_win_install_ffmpeg() if is_win else _try_unix_install_ffmpeg()
         if not ff_path:
             print("[BOOTSTRAP] ⚠ Could not install ffmpeg automatically. Please install manually.")
+    if ff_path:
+        print(f"[BOOTSTRAP] ffmpeg status: OK ({ffmpeg_method['v'] or 'unknown'})")
+    else:
+        print("[BOOTSTRAP] ffmpeg status: MISSING (needs manual install)")
 
     # Store resolved path for use by Worker
     if ff_path and ff_path != Path("ffmpeg"):
         os.environ["_HRZN_FFMPEG_EXE"] = str(ff_path)
 
     # yt-dlp: ensure installed via pip
+    ytdlp_method = {"v": None}
     try:
         subprocess.check_output(["yt-dlp", "--version"], stderr=subprocess.DEVNULL)
+        ytdlp_method["v"] = "found in PATH"
         print("[BOOTSTRAP] yt-dlp found ✓")
     except Exception:
         print("[BOOTSTRAP] yt-dlp not found — installing via pip...")
@@ -258,13 +300,208 @@ def _bootstrap_install():
                 [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade", "yt-dlp"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+            ytdlp_method["v"] = "installed via pip"
             print("[BOOTSTRAP] yt-dlp installed ✓")
         except Exception as e:
             print(f"[BOOTSTRAP] yt-dlp install failed: {e}")
+            ytdlp_method["v"] = None
+
+    if ytdlp_method["v"]:
+        print(f"[BOOTSTRAP] yt-dlp status: OK ({ytdlp_method['v']})")
+    else:
+        print("[BOOTSTRAP] yt-dlp status: MISSING (needs manual install)")
+
+    # NodeJS: ensure Node >= 20 so yt-dlp can run --js-runtimes node when building.
+    node_method = {"v": None}
+    node_attempts = []
+    def _node_major_version():
+        try:
+            out = subprocess.check_output(
+                ["node", "--version"], stderr=subprocess.DEVNULL, text=True
+            ).strip()
+            if out.startswith("v"):
+                out = out[1:]
+            return int(out.split(".", 1)[0])
+        except Exception:
+            return None
+
+    def _get_latest_node_v20_tag():
+        """Return latest v20.x tag like 'v20.18.0' (best-effort)."""
+        try:
+            with urllib.request.urlopen("https://nodejs.org/dist/index.json", timeout=20) as r:
+                data = json.loads(r.read().decode("utf-8", errors="ignore"))
+            v20 = [x.get("version") for x in data if str(x.get("version", "")).startswith("v20.")]
+            v20 = [v for v in v20 if v]
+            if not v20:
+                return "v20.18.0"
+            return sorted(v20)[-1]
+        except Exception:
+            return "v20.18.0"
+
+    def _direct_download_install_node(min_major: int = 20) -> bool:
+        import zipfile as _zf
+        import tarfile as _tarfile
+        import platform as _platform
+
+        tag = _get_latest_node_v20_tag()
+        major = int(tag.lstrip("v").split(".", 1)[0])
+        if major < min_major:
+            return False
+
+        arch_raw = (_platform.machine() or "").lower()
+        if is_win:
+            node_arch = "arm64" if ("arm" in arch_raw or "aarch64" in arch_raw) else "x64"
+            url = f"https://nodejs.org/dist/{tag}/node-{tag}-win-{node_arch}.zip"
+            ext = "zip"
+        elif is_mac:
+            node_arch = "arm64" if ("arm" in arch_raw or "aarch64" in arch_raw) else "x64"
+            url = f"https://nodejs.org/dist/{tag}/node-{tag}-darwin-{node_arch}.tar.gz"
+            ext = "tar.gz"
+        else:
+            node_arch = "arm64" if ("arm" in arch_raw or "aarch64" in arch_raw) else "x64"
+            url = f"https://nodejs.org/dist/{tag}/node-{tag}-linux-{node_arch}.tar.xz"
+            ext = "tar.xz"
+
+        print(f"[BOOTSTRAP] Installing Node.js {tag} via direct download...")
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            archive_path = tmp / ("node." + ext.replace(".", "_"))
+            urllib.request.urlretrieve(url, archive_path)
+
+            if is_win:
+                with _zf.ZipFile(archive_path) as z:
+                    z.extractall(tmp)
+            else:
+                mode = "r:gz" if ext == "tar.gz" else "r:xz"
+                with _tarfile.open(archive_path, mode) as t:
+                    t.extractall(tmp)
+
+            extracted_root = next(tmp.rglob(f"node-{tag}-*"), None)
+            if extracted_root is None:
+                # As fallback, try the canonical prefix: node-v<version>...
+                extracted_root = next(tmp.rglob(f"node-v{tag[1:]}-*"), None)
+            if extracted_root is None or not extracted_root.exists():
+                raise RuntimeError("Could not locate extracted Node directory.")
+
+            dest_parent = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local"))) / "nodejs"
+            dest_parent.mkdir(parents=True, exist_ok=True)
+            dest_root = dest_parent / extracted_root.name
+            if not dest_root.exists():
+                shutil.copytree(extracted_root, dest_root)
+            _add_to_path(str(dest_root / "bin"))
+            return True
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    try:
+        node_major = _node_major_version()
+        if node_major is not None and node_major >= 20:
+            node_method["v"] = f"found (Node major={node_major})"
+            print("[BOOTSTRAP] Node.js >=20 found ✓")
+        else:
+            print("[BOOTSTRAP] Node.js < 20 or not found — attempting install...")
+
+            if is_win:
+                # Try package managers first.
+                for mgr, cmd in [
+                    ("winget", ["winget", "install", "--id", "OpenJS.NodeJS.LTS", "-e", "--silent"]),
+                    ("scoop",  ["scoop", "install", "nodejs-lts"]),
+                    ("choco",  ["choco", "install", "nodejs-lts", "-y"]),
+                ]:
+                    try:
+                        print(f"[BOOTSTRAP] Trying {mgr}...")
+                        node_attempts.append(mgr)
+                        r = subprocess.run(cmd, timeout=600, capture_output=True)
+                        if r.returncode == 0 and _node_major_version() and _node_major_version() >= 20:
+                            node_method["v"] = f"installed via {mgr}"
+                            print(f"[BOOTSTRAP] Node.js installed via {mgr} ✓")
+                            break
+                    except Exception:
+                        pass
+            elif is_mac:
+                # Best-effort brew install (may or may not provide Node 20 LTS)
+                for mgr, cmd in [
+                    ("brew", ["brew", "install", "node@20"]),
+                    ("brew", ["brew", "install", "node"]),
+                ]:
+                    try:
+                        print(f"[BOOTSTRAP] Trying {mgr}...")
+                        node_attempts.append(mgr)
+                        r = subprocess.run(cmd, timeout=600, capture_output=True)
+                        if r.returncode == 0 and _node_major_version() and _node_major_version() >= 20:
+                            node_method["v"] = f"installed via {mgr}"
+                            print(f"[BOOTSTRAP] Node.js installed via {mgr} ✓")
+                            break
+                    except Exception:
+                        pass
+            else:
+                # Linux: try common package managers (best-effort). If still <20,
+                # fallback to direct Node v20 download.
+                # Note: command may fail depending on distro permissions/tools.
+                linux_steps = [
+                    ("apt-get(nodejs/npm)", [
+                        ["sudo", "apt-get", "update"],
+                        ["sudo", "apt-get", "install", "-y", "nodejs", "npm"],
+                    ]),
+                    ("apt(nodejs/npm)", [
+                        ["sudo", "apt", "update"],
+                        ["sudo", "apt", "install", "-y", "nodejs", "npm"],
+                    ]),
+                    ("dnf(nodejs/npm)", [
+                        ["sudo", "dnf", "install", "-y", "nodejs", "npm"],
+                    ]),
+                    ("yum(nodejs/npm)", [
+                        ["sudo", "yum", "install", "-y", "nodejs", "npm"],
+                    ]),
+                    ("pacman(nodejs/npm)", [
+                        ["sudo", "pacman", "-S", "--noconfirm", "nodejs", "npm"],
+                    ]),
+                    ("zypper(nodejs/npm)", [
+                        ["sudo", "zypper", "install", "-y", "nodejs", "npm"],
+                    ]),
+                    ("apk(nodejs/npm)", [
+                        ["sudo", "apk", "add", "nodejs", "npm"],
+                    ]),
+                ]
+
+                for label, cmds in linux_steps:
+                    try:
+                        print(f"[BOOTSTRAP] Trying {label}...")
+                        node_attempts.append(label)
+                        for c in cmds:
+                            subprocess.run(c, timeout=600, capture_output=True)
+
+                        maj = _node_major_version()
+                        if maj is not None and maj >= 20:
+                            node_method["v"] = f"installed via {label}"
+                            print(f"[BOOTSTRAP] Node.js installed via {label} ✓")
+                            break
+                    except Exception:
+                        pass
+
+            # Direct download fallback (works without admin, across all OSes).
+            if _node_major_version() is None or _node_major_version() < 20:
+                if _direct_download_install_node(20):
+                    node_method["v"] = "installed via direct download"
+                    print("[BOOTSTRAP] Node.js installed via direct download ✓")
+    except Exception as e:
+        print(f"[BOOTSTRAP] Node.js auto-install failed: {e}")
+
+    node_final_major = _node_major_version()
+    if node_final_major is not None and node_final_major >= 20:
+        print(
+            f"[BOOTSTRAP] Node.js status: OK (major={node_final_major}, via={node_method['v'] or 'unknown'})"
+        )
+    else:
+        attempts_str = ", ".join(dict.fromkeys(node_attempts)) if node_attempts else "(no attempts recorded)"
+        print(
+            f"[BOOTSTRAP] Node.js status: MISSING (needs Node.js >=20). Attempts: {attempts_str}"
+        )
 
     print("[BOOTSTRAP] ── Done ──────────────────────────────")
 
-_IS_DEBUG = bool({"--debug"} & set(sys.argv[1:]))
+# CLI arguments removed: debug mode is controlled only via Settings.
+_IS_DEBUG = False
 
 # Pre-add %APPDATA%\ffmpeg to PATH so bootstrap tool checks can find it
 _appdata_ffmpeg = Path(os.environ.get("APPDATA", "")) / "ffmpeg"
@@ -272,6 +509,28 @@ if _appdata_ffmpeg.exists():
     _add_to_path(str(_appdata_ffmpeg))
 
 _bootstrap_install()
+
+def _node_major_version():
+    """Return Node major version (e.g. 20) or None if node is unavailable."""
+    try:
+        out = subprocess.check_output(
+            ["node", "--version"], stderr=subprocess.DEVNULL, text=True
+        ).strip()
+        if out.startswith("v"):
+            out = out[1:]
+        return int(out.split(".", 1)[0])
+    except Exception:
+        return None
+
+def _get_yt_dlp_js_runtimes_args():
+    """
+    yt-dlp option: --js-runtimes node
+    Only enabled when Node >= 20.
+    """
+    major = _node_major_version()
+    if major is not None and major >= 20:
+        return ["--js-runtimes", "node"]
+    return []
 
 
 def _get_ffmpeg_exe() -> str:
@@ -1342,22 +1601,30 @@ class Worker(QtCore.QThread):
 
     def _get_ytdlp_cookie_args(self) -> list:
         """
-        Use the browser specified in cfg to export cookies to a temp cookies.txt,
-        then return --cookies <path> args for yt-dlp.
-        Falls back to auto-detection if no browser is specified.
+        Return yt-dlp cookie args based on cfg:
+        - yt_cookies_file set → --cookies <path>
+        - yt_cookies_browser set → export via --cookies-from-browser, then --cookies <tmp>
+        - neither → attempt without cookies
         """
+        # Direct cookies.txt file takes priority
+        cookie_file = self.cfg.get("yt_cookies_file", "").strip()
+        if cookie_file and Path(cookie_file).exists():
+            self.log(f"Using cookies.txt: {cookie_file}")
+            return ["--cookies", cookie_file]
+
         browser = self.cfg.get("yt_cookies_browser", "").strip().lower()
         if not browser:
-            self.log("⚠️ No cookies browser specified, attempting without cookies")
+            self.log("⚠️ No cookies source specified, attempting without cookies")
             return []
 
         cookies_txt = Path(tempfile.mkdtemp()) / "cookies.txt"
         self._temp_files.append(cookies_txt.parent)
         self.log(f"Exporting cookies from {browser} → {cookies_txt}")
         try:
+            js_args = _get_yt_dlp_js_runtimes_args()
             r = subprocess.run(
-                ["yt-dlp", "--cookies-from-browser", browser,
-                 "--cookies", str(cookies_txt),
+                ["yt-dlp", "--cookies-from-browser", browser] + js_args +
+                ["--cookies", str(cookies_txt),
                  "--simulate", "--quiet", "--no-warnings",
                  "https://www.youtube.com/"],
                 capture_output=True, timeout=30
@@ -1379,8 +1646,9 @@ class Worker(QtCore.QThread):
         start = self.cfg.get("start_seconds")
         end   = self.cfg.get("end_seconds")
         cookie_args = self._get_ytdlp_cookie_args()
+        js_args = _get_yt_dlp_js_runtimes_args()
         cmd = (
-            ["yt-dlp"] + cookie_args +
+            ["yt-dlp"] + cookie_args + js_args + ["--remote-components", "ejs:github"] +
             ["-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
              "--merge-output-format", "mp4", "-o", str(out_path), url]
         )
@@ -1533,7 +1801,8 @@ class Worker(QtCore.QThread):
         self._ensure_dir(dst)
         out_tmpl = dst / f"{bgm_name}.%(ext)s"
         cookie_args = self._get_ytdlp_cookie_args()
-        cmd = ["yt-dlp"] + cookie_args + ["-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
+        js_args = _get_yt_dlp_js_runtimes_args()
+        cmd = ["yt-dlp"] + cookie_args + js_args + ["--remote-components", "ejs:github"] + ["-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
         self._run_subprocess(cmd)
         self.log("YouTube audio downloaded ✓")
 
@@ -1689,7 +1958,8 @@ class Worker(QtCore.QThread):
         desc = (
             f"§lFirst use restart the game!\n"
             f"Original Creator : Han's404 | Youtube: @zxyn404 ( Han's )\n"
-            f"Extension Creator : {creator}"
+            f"Extension Creator : {creator}\n"
+            f"Built with TuBeo5866's HorizonUI/NekoUI Extension Studio"
         )
 
         data = {
@@ -2361,7 +2631,8 @@ class NekoWorker(Worker):
         self._ensure_dir(dst_dir)
         out_tmpl = dst_dir / "bgm1.%(ext)s"
         cookie_args = self._get_ytdlp_cookie_args()
-        cmd = ["yt-dlp"] + cookie_args + ["-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
+        js_args = _get_yt_dlp_js_runtimes_args()
+        cmd = ["yt-dlp"] + cookie_args + js_args + ["--remote-components", "ejs:github"] + ["-x", "--audio-format", "vorbis", "-o", str(out_tmpl), url]
         self._run_subprocess(cmd)
         self.log("[NekoUI] YouTube audio downloaded ✓")
 
@@ -2860,7 +3131,7 @@ class JavaWorker(Worker):
         ver_x   = int(self.cfg.get("ext_ver_x", 1))
         ver_y   = int(self.cfg.get("ext_ver_y", 0))
         ver_z   = int(self.cfg.get("ext_ver_z", 0))
-        desc    = f"§fNekoUI AB - {name} (v{ver_x}.{ver_y}.{ver_z}) - by {creator}"
+        desc    = f"§fNekoUI AB - {name} (v{ver_x}.{ver_y}.{ver_z}) - by {creator} | Built with TuBeo5866's Extension Studio"
         content = json.dumps({
             "pack": {
                 "pack_format": 15,
@@ -3288,23 +3559,23 @@ class MainWindow(QWidget):
         self.btn_cancel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.btn_cancel.setFixedWidth(180)
 
-        # Open… button — outer tab bar row, left of Build
+
+        # All buttons go into the right column grid — no corner widgets needed
         self._btn_open_pack = QPushButton("Open…")
         self._btn_open_pack.setToolTip("Load an existing .mcpack or .zip to pre-fill the form")
         self._btn_open_pack.clicked.connect(self._load_pack_from_file)
+        self._btn_open_pack.setFixedWidth(90)
 
-        # Settings button — corner of the inner tab row (Bedrock only)
         self._btn_settings = QPushButton("Settings")
         self._btn_settings.setToolTip("Options & About")
         self._btn_settings.clicked.connect(self._show_settings_menu)
+        self._btn_settings.setFixedWidth(90)
 
-        self._inner_corner_widget = QWidget()
-        _icw_h = QHBoxLayout(self._inner_corner_widget)
-        _icw_h.setContentsMargins(0, 0, 4, 0)
-        _icw_h.setSpacing(2)
-        _icw_h.addWidget(self._btn_settings)
+        self._btn_about = QPushButton("About")
+        self._btn_about.setToolTip("About this studio")
+        self._btn_about.clicked.connect(self._show_about)
+        self._btn_about.setFixedWidth(90)
 
-        self._outer_tab_widget.setCornerWidget(self._btn_open_pack, Qt.TopRightCorner)
         self._outer_tab_widget.tabBar().setExpanding(True)
 
         # ── Inner tabs for Bedrock (HorizonUI | NekoUI) ───────────────────────
@@ -3319,10 +3590,8 @@ class MainWindow(QWidget):
             QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
             self._bedrock_tab_widget.addTab(w, label)
 
-        self._bedrock_tab_widget.setCornerWidget(self._inner_corner_widget, Qt.TopRightCorner)
-
-        # Java Edition: no inner tabs needed (both UIs share same structure)
-        self._java_tab_widget = None   # not used
+        # Java Edition: no inner tabs needed
+        self._java_tab_widget = None
 
         bedrock_outer = QWidget()
         bedrock_vbox  = QVBoxLayout(bedrock_outer)
@@ -3330,41 +3599,41 @@ class MainWindow(QWidget):
         bedrock_vbox.setSpacing(0)
         bedrock_vbox.addWidget(self._bedrock_tab_widget)
 
-        # Java outer — plain widget, no inner tabs
+        # Java outer — plain widget, no inner tabs (uses same right-column buttons)
         java_outer = QWidget()
         java_outer.setStyleSheet("background: transparent;")
-        java_vbox  = QVBoxLayout(java_outer)
-        java_vbox.setContentsMargins(0, 0, 0, 0)
-        java_vbox.setSpacing(0)
-        # Settings button for Java side (reuse same widget)
-        java_settings_row = QWidget()
-        java_settings_h   = QHBoxLayout(java_settings_row)
-        java_settings_h.setContentsMargins(4, 2, 4, 2)
-        java_settings_h.setSpacing(2)
-        java_settings_h.addStretch()
-        # Settings re-parented dynamically in _on_outer_tab_changed
-        java_vbox.addWidget(java_settings_row)
-        self._java_settings_row = java_settings_row
+        java_outer_v = QVBoxLayout(java_outer)
+        java_outer_v.setContentsMargins(0, 0, 0, 0)
 
         self._outer_tab_widget.addTab(bedrock_outer, "Bedrock Edition")
         self._outer_tab_widget.addTab(java_outer,    "Java Edition")
 
-        # ── Tab area + Build button side by side ──────────────────────────────
+        # ── Tab area + right column ────────────────────────────────────────────
+        # Right column layout:
+        #   col 0          | col 1
+        #   [  Open...  ]  | [         ]
+        #   [  Settings ]  | [  Build  ]
+        from PyQt5.QtWidgets import QGridLayout as _QGL
         tab_build_row = QWidget()
         tab_build_h   = QHBoxLayout(tab_build_row)
         tab_build_h.setContentsMargins(0, 0, 0, 0)
         tab_build_h.setSpacing(0)
         tab_build_h.addWidget(self._outer_tab_widget, stretch=1)
 
-        # Build / Cancel span both tab rows in a fixed-width column
-        build_col = QWidget()
-        build_col.setFixedWidth(184)
-        build_col_v = QVBoxLayout(build_col)
-        build_col_v.setContentsMargins(4, 2, 4, 2)
-        build_col_v.setSpacing(0)
-        build_col_v.addWidget(self.btn_run, stretch=1)
-        build_col_v.addWidget(self.btn_cancel, stretch=1)
-        tab_build_h.addWidget(build_col)
+        right_col  = QWidget()
+        right_col.setFixedWidth(280)
+        right_grid = _QGL(right_col)
+        right_grid.setContentsMargins(4, 2, 4, 2)
+        right_grid.setSpacing(2)
+        right_grid.addWidget(self._btn_open_pack, 0, 0)
+        right_grid.addWidget(self._btn_settings,  1, 0)
+        right_grid.addWidget(self._btn_about,      2, 0)
+        right_grid.addWidget(self.btn_run,         0, 1, 2, 1)
+        right_grid.addWidget(self.btn_cancel,      0, 1, 2, 1)
+        right_grid.setColumnStretch(0, 0)
+        right_grid.setColumnStretch(1, 1)
+        tab_build_h.addWidget(right_col)
+        tab_build_h.setAlignment(right_col, _Qt.AlignTop)
 
         outer.addWidget(tab_build_row)
 
@@ -3380,6 +3649,7 @@ class MainWindow(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
+        self._splitter = splitter
 
         left_outer = QWidget()
         left_outer.setMinimumWidth(480)
@@ -3436,11 +3706,35 @@ class MainWindow(QWidget):
         btn_fmt.clicked.connect(lambda: self._open_format_dialog(self.inp_packname))
         _row("Extension Name:", self.inp_packname, btn_fmt)
 
+        # Debug-only: log when user edits the field directly (not via Format dialog).
+        self._dbg_last_packname = self.inp_packname.text()
+        def _on_packname_edited():
+            if not _IS_DEBUG:
+                return
+            new = self.inp_packname.text().strip()
+            old = getattr(self, "_dbg_last_packname", "")
+            if new != old:
+                self.append_log(f"[DEBUG] Extension Name changed: {old!r} → {new!r}")
+            self._dbg_last_packname = new
+        self.inp_packname.editingFinished.connect(_on_packname_edited)
+
         self.inp_creator = QLineEdit("Unknown")
         btn_fmt_creator = QPushButton("Format…")
         btn_fmt_creator.setToolTip("Insert Minecraft § colour / style codes into the creator name")
         btn_fmt_creator.clicked.connect(lambda: self._open_format_dialog(self.inp_creator))
         _row("Creator Name:", self.inp_creator, btn_fmt_creator)
+
+        # Debug-only: log when user edits the field directly (not via Format dialog).
+        self._dbg_last_creator = self.inp_creator.text()
+        def _on_creator_edited():
+            if not _IS_DEBUG:
+                return
+            new = self.inp_creator.text().strip()
+            old = getattr(self, "_dbg_last_creator", "")
+            if new != old:
+                self.append_log(f"[DEBUG] Creator Name changed: {old!r} → {new!r}")
+            self._dbg_last_creator = new
+        self.inp_creator.editingFinished.connect(_on_creator_edited)
 
         self.inp_pack_icon = QLineEdit()
         self.inp_pack_icon.setPlaceholderText("(optional) Select a PNG file")
@@ -3600,17 +3894,22 @@ class MainWindow(QWidget):
         g.addWidget(self.inp_yt_url, r, 1, 1, 2)
         r += 1
 
-        # YouTube cookies browser field
-        self.inp_yt_cookies = QLineEdit()
-        self.inp_yt_cookies.setPlaceholderText("e.g. chrome, firefox, edge…")
-        self._lbl_yt_cookies = QLabel("Cookies Browser:")
+
+        # YouTube cookies — cookies.txt file only
+        self._lbl_yt_cookies = QLabel("Cookies File:")
+
+        self.inp_yt_cookiefile = QLineEdit()
+        self.inp_yt_cookiefile.setPlaceholderText("Select cookies.txt (Netscape format)")
+        self.inp_yt_cookiefile.setReadOnly(True)
+        self._btn_yt_cookiefile = QPushButton("Browse…")
+        self._btn_yt_cookiefile.clicked.connect(self._browse_yt_cookiefile)
 
         yt_cookies_help = QLabel('<a href="#">?</a>')
         yt_cookies_help.setToolTip(
-            "YouTube requires cookies to avoid bot detection (HTTP 429).\n"
-            "Enter your browser name (chrome, firefox, edge, brave…)\n"
-            "so yt-dlp can read cookies automatically.\n\n"
-            "Click to open documentation:"
+            "YouTube requires a cookies.txt file to avoid bot detection (HTTP 429).\n"
+            "Export your cookies using a browser extension (e.g. 'Get cookies.txt LOCALLY')\n"
+            "then browse to the file here.\n\n"
+            "Click to open documentation."
         )
         yt_cookies_help.setFixedWidth(16)
         yt_cookies_help.setAlignment(Qt.AlignCenter)
@@ -3623,7 +3922,8 @@ class MainWindow(QWidget):
         yt_cookies_h = QHBoxLayout(self._yt_cookies_row)
         yt_cookies_h.setContentsMargins(0, 0, 0, 0)
         yt_cookies_h.setSpacing(4)
-        yt_cookies_h.addWidget(self.inp_yt_cookies, stretch=1)
+        yt_cookies_h.addWidget(self.inp_yt_cookiefile, stretch=1)
+        yt_cookies_h.addWidget(self._btn_yt_cookiefile)
         yt_cookies_h.addWidget(yt_cookies_help)
 
         g.addWidget(self._lbl_yt_cookies, r, 0)
@@ -3855,6 +4155,7 @@ class MainWindow(QWidget):
         splitter.addWidget(left_outer)
 
         right_widget = QWidget()
+        self._right_widget = right_widget
         right_widget.setMinimumWidth(180)
         right_vbox = QVBoxLayout(right_widget)
         right_vbox.setContentsMargins(0, 0, 0, 0)
@@ -3889,7 +4190,11 @@ class MainWindow(QWidget):
         right_vbox.addWidget(self.lbl_status)
 
         splitter.addWidget(right_widget)
-        splitter.setSizes([520, 360])
+        self._splitter_default_sizes = [520, 360]
+        splitter.setSizes(self._splitter_default_sizes)
+        # Apply initial "Show build logs" setting.
+        _s = _load_settings()
+        self._apply_build_logs(_s.get("show_build_logs", True), persist=False)
 
     def _current_edition(self) -> str:
         """Returns 'bedrock' or 'java'."""
@@ -3922,14 +4227,14 @@ class MainWindow(QWidget):
             self._container_bg_count_lbl.setStyleSheet(
                 ("color:#7ec8e3;" if n else "color:#888;") + " font-size:10px;"
             )
+            if _IS_DEBUG:
+                self.append_log(f"[DEBUG] Container background(s) updated: {n} custom")
 
     def _on_outer_tab_changed(self, _index: int):
         if not hasattr(self, "btn_run"):
             return
-        # Settings button lives in bedrock inner tab corner only
-        if self._current_edition() == "bedrock":
-            self._bedrock_tab_widget.setCornerWidget(self._inner_corner_widget, Qt.TopRightCorner)
-            self._inner_corner_widget.show()
+        if _IS_DEBUG and hasattr(self, "log_box"):
+            self.append_log(f"[DEBUG] Edition changed → {self._current_edition()}")
         self._toggle_java_fields()
         self._update_build_button()
 
@@ -3937,6 +4242,10 @@ class MainWindow(QWidget):
         """Called when either inner tab widget changes."""
         if not hasattr(self, "btn_run"):
             return
+        if _IS_DEBUG and hasattr(self, "log_box"):
+            self.append_log(
+                f"[DEBUG] UI tab changed → {self._current_edition()} / {self._current_ui_mode()}"
+            )
         self._update_build_button()
 
     def _update_build_button(self):
@@ -3944,15 +4253,25 @@ class MainWindow(QWidget):
         ui_mode = self._current_ui_mode()
         if edition == "java":
             line1 = "Build zip"
-            line2 = f"Java / {'NekoUI' if ui_mode == 'neko' else 'HorizonUI'}"
+            line2 = f"Java / both UI"
         else:
             line1 = "Build mcpack"
             line2 = f"Bedrock / {'NekoUI' if ui_mode == 'neko' else 'HorizonUI'}"
         self.btn_run.setText(f"{line1}\n({line2})")
 
     def _open_format_dialog(self, target_field: "QLineEdit"):
+        before = target_field.text()
         dlg = McFormatDialog(target_field, parent=self)
         dlg.exec_()
+        after = target_field.text()
+        if _IS_DEBUG and after != before:
+            field_name = "pack name" if target_field is getattr(self, "inp_packname", None) else \
+                ("creator" if target_field is getattr(self, "inp_creator", None) else "field")
+            self.append_log(f"[DEBUG] Format dialog changed {field_name}: {before!r} → {after!r}")
+            if field_name == "pack name" and hasattr(self, "_dbg_last_packname"):
+                self._dbg_last_packname = after
+            elif field_name == "creator" and hasattr(self, "_dbg_last_creator"):
+                self._dbg_last_creator = after
 
     def _update_anim_frames_label(self, *_):
         """Recompute Anim Frames = (End - Start) * FPS and update the label."""
@@ -3976,22 +4295,44 @@ class MainWindow(QWidget):
         """No-op — Loading Frames row removed."""
         pass
 
+    def _browse_yt_cookiefile(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select cookies.txt",
+            filter="Cookies file (*.txt);;All Files (*)"
+        )
+        if f:
+            before = self.inp_yt_cookiefile.text().strip()
+            self.inp_yt_cookiefile.setText(f)
+            if _IS_DEBUG and f != before:
+                self.append_log(f"[DEBUG] cookies.txt changed: {before!r} → {f!r}")
+
     def browse_video(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select Video", filter="Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)")
-        if f: self.inp_video.setText(f)
+        if f:
+            before = self.inp_video.text().strip()
+            self.inp_video.setText(f)
+            if _IS_DEBUG and f != before:
+                self.append_log(f"[DEBUG] Source video changed: {before!r} → {f!r}")
 
     def browse_image_source(self):
         f, _ = QFileDialog.getOpenFileName(
             self, "Select Background Image",
             filter="Images (*.png *.jpg *.jpeg *.webp *.bmp *.tga);;All Files (*)"
         )
-        if f: self.inp_image_src.setText(f)
+        if f:
+            before = self.inp_image_src.text().strip()
+            self.inp_image_src.setText(f)
+            if _IS_DEBUG and f != before:
+                self.append_log(f"[DEBUG] Source background image changed: {before!r} → {f!r}")
 
     def _toggle_source_type(self, _checked=None):
         """Show/hide rows depending on source type (Video / YouTube / Image)."""
         is_video   = self.rdo_src_video.isChecked()
         is_youtube = self.rdo_src_youtube.isChecked()
         is_image   = self.rdo_src_image.isChecked()
+        mode = "Video" if is_video else ("YouTube" if is_youtube else "Image")
+        if _IS_DEBUG and hasattr(self, "_lbl_video") and hasattr(self, "log_box"):
+            self.append_log(f"[DEBUG] Source type changed → {mode}")
         is_video_like = is_video or is_youtube  # both show time/fps/frames
 
         for w in (self._lbl_video, self.inp_video, self._btn_browse_video):
@@ -4019,6 +4360,8 @@ class MainWindow(QWidget):
         )
         if not path:
             return
+        if _IS_DEBUG:
+            self.append_log(f"[DEBUG] Load pack selected: {path}")
 
         try:
             self._do_load_pack(Path(path))
@@ -4124,6 +4467,12 @@ class MainWindow(QWidget):
         edition_str = "Java Edition" if is_java else "Bedrock Edition"
         ui_str      = "NekoUI" if is_neko else "HorizonUI"
         frames_str  = f"{anim_frames} anim frame(s) detected" if anim_frames else "no frames detected"
+        if _IS_DEBUG:
+            self.append_log(
+                "[DEBUG] Pack metadata loaded: "
+                f"{edition_str} / {ui_str}, name={name or '(unknown)'}, creator={creator or '(unknown)'}, "
+                f"ver={ver[0]}.{ver[1]}.{ver[2]}, frames={frames_str}, file={pack_path.name}"
+            )
         QMessageBox.information(
             self, "Pack Loaded",
             f"Loaded: {pack_path.name}\n\n"
@@ -4139,12 +4488,19 @@ class MainWindow(QWidget):
 
     def browse_output(self):
         d = QFileDialog.getExistingDirectory(self, "Select Output Folder")
-        if d: self.inp_output.setText(d)
+        if d:
+            before = self.inp_output.text().strip()
+            self.inp_output.setText(d)
+            if _IS_DEBUG and d != before:
+                self.append_log(f"[DEBUG] Output folder changed: {before!r} → {d!r}")
 
     def browse_loading_bg(self):
         d = QFileDialog.getExistingDirectory(self, "Select Folder Containing Loading Background Images")
         if d:
+            before = self.inp_loading_bg.text().strip()
             self.inp_loading_bg.setText(d)
+            if _IS_DEBUG and d != before:
+                self.append_log(f"[DEBUG] Loading BG folder changed: {before!r} → {d!r}")
 
     def browse_bgm(self):
         f, _ = QFileDialog.getOpenFileName(
@@ -4152,7 +4508,10 @@ class MainWindow(QWidget):
             filter="Audio Files (*.ogg *.mp3 *.wav *.flac *.m4a *.aac *.opus *.wma *.aiff);;All Files (*)"
         )
         if f:
+            before = self.inp_bgm.text().strip()
             self.inp_bgm.setText(f)
+            if _IS_DEBUG and f != before:
+                self.append_log(f"[DEBUG] BGM file changed: {before!r} → {f!r}")
 
     def browse_pack_icon(self):
         f, _ = QFileDialog.getOpenFileName(
@@ -4161,6 +4520,8 @@ class MainWindow(QWidget):
         )
         if not f:
             return
+        if _IS_DEBUG:
+            self.append_log(f"[DEBUG] Pack icon selection: {f}")
 
         src = Path(f)
 
@@ -4169,6 +4530,8 @@ class MainWindow(QWidget):
             self._pack_icon_path = f
             self.inp_pack_icon.setText(f"[pack_icon] {src.name}")
             self._update_icon_thumb_from_path(f)
+            if _IS_DEBUG:
+                self.append_log(f"[DEBUG] Pack icon set from existing 'pack_icon': {src.name}")
             return
 
         dlg = PackIconCropDialog(f, parent=self)
@@ -4179,10 +4542,14 @@ class MainWindow(QWidget):
                 self._pack_icon_path = f
                 self.inp_pack_icon.setText(f"[cropped] {src.name}")
                 self._update_icon_thumb_from_pil(result_img)
+                if _IS_DEBUG:
+                    self.append_log(f"[DEBUG] Pack icon set (cropped): {src.name}")
 
     def clear_pack_icon(self):
         self._pack_icon_pil  = None
         self._pack_icon_path = ""
+        if _IS_DEBUG:
+            self.append_log("[DEBUG] Pack icon cleared")
         self.inp_pack_icon.clear()
         self._icon_thumb.clear()
         self._icon_thumb.setPixmap(QPixmap())
@@ -4222,10 +4589,10 @@ class MainWindow(QWidget):
                 "Please fill in Source, Output Folder, and Extension Name.")
             return
 
-        if is_youtube_mode and not self.inp_yt_cookies.text().strip():
+        if is_youtube_mode and not self.inp_yt_cookiefile.text().strip():
             QMessageBox.warning(self, "Missing Fields",
-                "YouTube Cookies Browser is required for YouTube sources.\n"
-                "Enter your browser name (e.g. chrome, firefox, edge).")
+                "A cookies.txt file is required for YouTube sources.\n"
+                "Please browse to your cookies.txt file.")
             return
 
         if is_image_mode and not self.inp_bgm.text().strip() and self._current_edition() != "java":
@@ -4250,7 +4617,8 @@ class MainWindow(QWidget):
             "video_path":           video,
             "source_is_image":      is_image_mode,
             "source_is_youtube":    is_youtube_mode,
-            "yt_cookies_browser":   self.inp_yt_cookies.text().strip() if is_youtube_mode else "",
+            "yt_cookies_browser":   "",
+            "yt_cookies_file":      self.inp_yt_cookiefile.text().strip() if is_youtube_mode else "",
             "output_folder":    output,
             "new_pack_name":    name,
             "creator":          self.inp_creator.text().strip(),
@@ -4292,6 +4660,9 @@ class MainWindow(QWidget):
         self.btn_run.setVisible(False)
         self.btn_cancel.setVisible(True)
         self.btn_cancel.setEnabled(True)
+        self._btn_open_pack.setEnabled(False)
+        if hasattr(self, "_btn_about"):
+            self._btn_about.setEnabled(False)
         self._form_widget.setEnabled(False)
         self.progress_bar.setValue(0)
         edition = self._current_edition()
@@ -4305,6 +4676,18 @@ class MainWindow(QWidget):
         else:
             self.worker = Worker(cfg)
             mode_label  = "Bedrock / HorizonUI"
+        if _IS_DEBUG:
+            pack_icon_src = (
+                cfg.get("pack_icon_path", "") if cfg.get("pack_icon_path", "").strip()
+                else ("in-memory PIL" if cfg.get("pack_icon_pil") is not None else "")
+            )
+            self.append_log(
+                "[DEBUG] Build prepared: "
+                f"{mode_label}; source={{image:{is_image_mode}, youtube:{is_youtube_mode}}}; "
+                f"video_or_img={cfg.get('video_path','')!r}; output={cfg.get('output_folder','')!r}; "
+                f"name={cfg.get('new_pack_name','')!r}; creator={cfg.get('creator','')!r}; "
+                f"bgm={cfg.get('bgm_file','')!r}; pack_icon={pack_icon_src!r}"
+            )
         self.worker.log_signal.connect(self.append_log)
         self.worker.done_signal.connect(self.on_done)
         self.worker.progress_signal.connect(self.progress_bar.setValue)
@@ -4333,6 +4716,9 @@ class MainWindow(QWidget):
                 self.btn_run.setVisible(True)
                 self.btn_cancel.setVisible(False)
                 self.btn_cancel.setEnabled(False)
+                self._btn_open_pack.setEnabled(True)
+                if hasattr(self, "_btn_about"):
+                    self._btn_about.setEnabled(True)
 
     def on_done(self, ok: bool, msg: str):
         self.append_log(f"=== {'Done' if ok else 'Error'} ===")
@@ -4340,6 +4726,9 @@ class MainWindow(QWidget):
         self.btn_run.setVisible(True)
         self.btn_cancel.setVisible(False)
         self.btn_cancel.setEnabled(False)
+        self._btn_open_pack.setEnabled(True)
+        if hasattr(self, "_btn_about"):
+            self._btn_about.setEnabled(True)
         self.progress_bar.setValue(100 if ok else 0)
         self._update_build_button()
         (QMessageBox.information if ok else QMessageBox.critical)(self, "Result", msg)
@@ -4375,11 +4764,14 @@ class MainWindow(QWidget):
         act_debug.setDefaultWidget(self._chk_debug)
         menu.addAction(act_debug)
 
-        menu.addSeparator()
-
-        # ── About ─────────────────────────────────────────────────────────────
-        act_about = menu.addAction("About")
-        act_about.triggered.connect(self._show_about)
+        self._chk_show_build_logs = QCheckBox("  Show build logs")
+        self._chk_show_build_logs.setChecked(_s.get("show_build_logs", True))
+        self._chk_show_build_logs.toggled.connect(
+            lambda checked: self._apply_build_logs(checked, persist=True)
+        )
+        act_logs = QWidgetAction(menu)
+        act_logs.setDefaultWidget(self._chk_show_build_logs)
+        menu.addAction(act_logs)
 
         menu.exec_(self._btn_settings.mapToGlobal(
             self._btn_settings.rect().bottomLeft()
@@ -4397,6 +4789,36 @@ class MainWindow(QWidget):
         s = _load_settings()
         s["debug"] = checked
         _save_settings(s)
+        # Log the toggle itself so users see the effect immediately.
+        if checked:
+            try:
+                self.append_log("[DEBUG] Show more DEBUG logs enabled")
+            except Exception:
+                pass
+
+    def _apply_build_logs(self, checked: bool, persist: bool = True):
+        """Show/hide the Build Log panel (right side)."""
+        if persist:
+            s = _load_settings()
+            s["show_build_logs"] = checked
+            _save_settings(s)
+
+        if not hasattr(self, "_right_widget") or not hasattr(self, "_splitter"):
+            return
+
+        if checked:
+            self._right_widget.setVisible(True)
+            self._right_widget.setMinimumWidth(180)
+            self.setMinimumWidth(860)
+            self._splitter.setSizes(self._splitter_default_sizes)
+        else:
+            self._right_widget.setVisible(False)
+            self._right_widget.setMinimumWidth(0)
+            # Keep the window smaller when logs are hidden.
+            self.setMinimumWidth(700)
+            left_sz = self._splitter_default_sizes[0] if hasattr(self, "_splitter_default_sizes") else 520
+            self._splitter.setSizes([left_sz, 0])
+        self.adjustSize()
 
     def _show_about(self):
         dlg = QDialog(self)
@@ -4454,6 +4876,7 @@ class MainWindow(QWidget):
             return b
 
         btn_row.addWidget(_link_btn("Website",          "https://tubeo5866.com"))
+        btn_row.addWidget(_link_btn("GitHub",            "https://github.com/usira-or-arisu/horizonui-and-nekoui-extension-studio"))
         btn_row.addWidget(_link_btn("Discord Support",   "https://discord.gg/3fe3ySCJZf"))
         btn_row.addWidget(_link_btn("Email Support",     "mailto:support@tubeo5866.com"))
         btn_row.addWidget(_link_btn("Request a Feature", "https://forms.gle/KTJQCq8EdseQhFKp9"))
@@ -4709,23 +5132,20 @@ def _check_license(app: "QApplication") -> bool:
     dlg.exec_()
     return dlg._accepted
 
-
-
 def main():
+    global _IS_DEBUG
     app = QApplication(sys.argv)
 
     if not _check_license(app):
         sys.exit(0)
 
-    w = MainWindow()
     settings = _load_settings()
+    _IS_DEBUG = bool(settings.get("debug", False))
+    w = MainWindow()
     if settings.get("transparent", True):
         w.setWindowOpacity(0.85)
-    if settings.get("debug", False):
-        _IS_DEBUG = True
     w.show()
     sys.exit(app.exec_())
-
 
 if __name__ == "__main__":
     main()
