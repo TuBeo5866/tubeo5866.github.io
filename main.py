@@ -3475,7 +3475,8 @@ class MainWindow(QWidget):
             print(f"[icon] Could not load icon: {e}")
 
     def _prefetch_banner(self):
-        _BANNER_URL = "https://www.dropbox.com/scl/fi/w61xk942afmyvz54rb8xx/HDILdO1aoAArAMq.jpg?rlkey=rd1bfbpky16kta3jkelsp480e&st=fatacbzw&dl=1"
+        # _BANNER_URL = "https://www.dropbox.com/scl/fi/w61xk942afmyvz54rb8xx/HDILdO1aoAArAMq.jpg?rlkey=rd1bfbpky16kta3jkelsp480e&st=fatacbzw&dl=1"
+        _BANNER_URL = "https://www.dropbox.com/scl/fi/n5h1izvakb8k90xuao2ej/1265613.png?rlkey=uw7g9a0ll1dv8sefsm8bd1lzz&st=2wmk98wu&dl=1"
 
         class _Fetcher(QtCore.QThread):
             result = QtCore.pyqtSignal(bytes)
