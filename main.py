@@ -4835,7 +4835,8 @@ class MainWindow(QWidget):
         self._about_banner_lbl = QLabel()
         self._about_banner_lbl.setFixedHeight(200)
         self._about_banner_lbl.setAlignment(Qt.AlignCenter)
-        self._about_banner_lbl.setStyleSheet("background:#d7d7d7;")
+        # self._about_banner_lbl.setStyleSheet("background:#d7d7d7;")
+        self._about_banner_lbl.setStyleSheet("background:#EA67C0;")
         outer.addWidget(self._about_banner_lbl)
 
         # Use pre-fetched data (loaded at startup)
