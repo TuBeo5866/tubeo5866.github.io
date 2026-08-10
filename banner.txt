@@ -1,3 +1,2 @@
-All errors are fixed -- now the script is running smoothly. 
-If you still found a problem, go to "About" and get support from my Discord server or my mail support!
-Also, request a new feature you think it'll be useful to my script!
+Note: this studio will migrate to a website version. That means a better look, but keep its purpose and no more ugly Qt6 Engine!
+And it'll be an actual studio: projects at your local browser, after the pack build (still in progress, please wait!)
