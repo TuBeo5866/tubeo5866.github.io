@@ -1,0 +1,11 @@
+[v1.0.2] Changelogs
+
+[UsirAHrzn] a service for building background extensions for Hans' projects - HorizonUI and NekoUI
+ - Add /mcpack and /mcpack/new for dashboard page and pack building page
+ - Supports multi-tasks (don't abuse it)
+ - Supports HorizonUI v1.8 (v2? idk when to do that)
+ - Smooth UI, just like Telegram :P
+
+[BUGS] fixed some, please find more in the app
+
+Once again, happy hosting & building!
