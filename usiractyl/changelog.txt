@@ -1,11 +1,18 @@
-[v1.0.2] Changelogs
+[v1.0.3]
+ [UsirAHrzn] rebranded to [Usiru] (better name)
+  - Add preview panel when proceeding to build extensions
+  - Add support for HorizonUI: Java Edition
 
-[UsirAHrzn] a service for building background extensions for Hans' projects - HorizonUI and NekoUI
- - Add /mcpack and /mcpack/new for dashboard page and pack building page
- - Supports multi-tasks (don't abuse it)
- - Supports HorizonUI v1.8 (v2? idk when to do that)
- - Smooth UI, just like Telegram :P
+[v1.0.2]
+ [UsirAHrzn] a service for building background extensions for Hans' projects - HorizonUI and NekoUI
+  - Add /mcpack and /mcpack/new for dashboard page and pack building page
+  - Supports multi-tasks (don't abuse it)
+  - Supports HorizonUI v1.8 (v2? idk when to do that)
+  - Smooth UI, just like Telegram :P
+ [FIXES] bugs, please find more in the app
 
-[BUGS] fixed some, please find more in the app
+[v1.0.1]
+ [FIXES] bugs and more
 
-Once again, happy hosting & building!
+[v1.0.0]
+ First release
