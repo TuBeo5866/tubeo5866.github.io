@@ -2,6 +2,7 @@
  [UsirAHrzn] rebranded to [Usiru] (better name)
   - Add preview panel when proceeding to build extensions
   - Add support for HorizonUI: Java Edition
+ [UI] Smoother transtion when hovering sidebar
 
 [v1.0.2]
  [UsirAHrzn] a service for building background extensions for Hans' projects - HorizonUI and NekoUI
