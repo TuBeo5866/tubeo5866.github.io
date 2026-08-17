@@ -1,3 +1,8 @@
+[v1.0.3]
+ [UsirAHrzn] rebranded to [Usiru] (better name)
+  - Add preview panel when proceeding to build extensions
+  - Add support for HorizonUI: Java Edition
+
 [v1.0.2]
  [UsirAHrzn] a service for building background extensions for Hans' projects - HorizonUI and NekoUI
   - Add /mcpack and /mcpack/new for dashboard page and pack building page
