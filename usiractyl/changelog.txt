@@ -5,6 +5,7 @@
  [UI]
   - Smoother transtion when hovering sidebar
   - Live-update coins balance (after purchasing resources, AFK, sending/receiving coins, etc.)
+ [Updater] Fix updated dialog always load when accessing the dashboard
 
 [v1.0.2]
  [UsirAHrzn] a service for building background extensions for Hans' projects - HorizonUI and NekoUI
