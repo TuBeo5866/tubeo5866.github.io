@@ -1,3 +1,8 @@
+[v1.0.4]
+ [Party Mode] (BETA) A chance to earn more coins with other users in this platform
+  - More people, more coins, via multiple threshold!
+  - Uses it normally: buy resources & upgrades at store, or keep it in case!
+
 [v1.0.3]
  [UsirAHrzn] rebranded to [Usiru] (better name)
   - Add preview panel when proceeding to build extensions
