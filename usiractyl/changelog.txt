@@ -1,3 +1,9 @@
+[v1.0.5]
+ [UI] Refactored: 
+  - In your server > Settings page
+  - In AFK page (some elements are not shown correctly)
+  - In other places :P
+
 [v1.0.4]
  [Party Mode] (BETA) A chance to earn more coins with other users in this platform
   - More people, more coins, via multiple threshold!
