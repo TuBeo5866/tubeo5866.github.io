@@ -1,8 +1,15 @@
+[v1.0.6]
+ [Usira]
+  [UI] Remade with some small changes:
+   - Steps in Build Output are more understandable, not too much
+   - Drag-to-upload-video is here: quickly and easily set your background
+  [Pack Download]
+   - Fix the pack downloading with no-file-extension UUID-name pack
+
 [v1.0.5]
  [UI] Refactored: 
   - In your server > Settings page
   - In AFK page (some elements are not shown correctly)
-  - In other places :P
 
 [v1.0.4]
  [Party Mode] (BETA) A chance to earn more coins with other users in this platform
