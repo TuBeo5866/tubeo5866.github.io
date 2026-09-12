@@ -1,0 +1,16 @@
+{
+    "spec": 1,
+    "name": "Google Sans Flex",
+    "previewText": "The main font used in all Google products, websites, apps, and more.",
+    "main": {
+        "GoogleSansFlex_Black": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Black.ttf?raw=1",
+        "GoogleSansFlex_Bold": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Bold.ttf?raw=1",
+        "GoogleSansFlex_ExtraBold": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-ExtraBold.ttf?raw=1",
+        "GoogleSansFlex_ExtraLight": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-ExtraLight?raw=1",
+        "GoogleSansFlex_Light": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Light.ttf?raw=1",
+        "GoogleSansFlex_Medium": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Medium.ttf?raw=1",
+        "GoogleSansFlex_Regular": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Regular.ttf?raw=1",
+        "GoogleSansFlex_Semibold": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Semibold.ttf?raw=1",
+        "GoogleSansFlex_Thin": "https://github.com/TuBeo5866/tubeo5866.github.io/raw/main/revenge-fonts/GoogleSansFlex_24pt-Thin.ttf?raw=1"
+    }
+}
